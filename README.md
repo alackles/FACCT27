@@ -1,1 +1,1 @@
-FAccT 2027 paper on structural analysis of r/ClaudeAIJailbreak
+FAccT 2027 paper on structural analysis of r/ClaudeAIJailbreak. This repo holds the structural analysis source code, analysis, and data. Paper itself lives in [this repository](https://github.com/alackles/FACCT27-draft).
