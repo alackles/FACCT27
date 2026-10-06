@@ -56,4 +56,4 @@ Implications for Claude's work here:
 
 - Python. Prefer the simplest mechanism that does the job.
 - Tests sized to stakes: data integrity, de-identification, sampling, and anything the paper reports a number from — not every branch.
-- Commits by Claude: `git commit --author="Claude <noreply@anthropic.com>"`, small, with messages that say what and why.
+- Commits by Claude: author `Claude <noreply@anthropic.com>` (Acacia stays committer), small, with messages that say what and why. End every message with a `Co-Authored-By: Claude <model name> <noreply@anthropic.com>` trailer. The trailer is how the model is recorded.
