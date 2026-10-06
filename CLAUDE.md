@@ -29,7 +29,7 @@ These decisions belong to the authors. Flag them whenever code touches them; nev
 
 - Reddit Data API terms and the access route used.
 - IRB scope for public community data.
-- De-identification: hashing usernames vs. naming public creators (e.g. Spiritual Spell, who publishes ENI under that handle).
+- De-identification: usernames are pseudonymized (C1, C2, …), and quotes may need paraphrasing. Whether to name the creator of ENI is open between the authors; Acacia's position is not to name them (see `PROJECT.md` in the draft repo). Code must not hard-code or special-case any real handle.
 - Retention, storage location, and what (if anything) is released with the paper.
 
 Fixed rules: raw and derived data are never committed (`data/` is gitignored); API keys go through `python-dotenv` and `.env`, never printed, logged, or committed.
