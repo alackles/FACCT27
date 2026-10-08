@@ -3,12 +3,15 @@
     uv run python -m facct27.pseudonymize data/raw/2026-10-08
 
 Writes data/processed/<date>/{posts,comments,wikis}.jsonl and report.json,
-and keeps the handle -> pseudonym map, its seed, and the bare-name review
-list in data/private/<date>/. Nothing under data/ is committed.
+and the bare-name review list to data/private/<date>/. The handle -> pseudonym
+map and its seed live in data/private/ and are shared by every snapshot, so a
+pseudonym quoted in the paper survives a re-collection. Nothing under data/
+is committed.
 
-Pseudonyms (C1, C2, ...) are assigned by shuffling the sorted author set with
-a stored random seed, so the numbering carries no information about
-activity. See DECISIONS.md (2026-10-08) for the deletion policy.
+Pseudonyms (C1, C2, ...) are assigned by shuffling authors with a stored
+random seed, so the numbering carries no information about activity. Authors
+new to a later snapshot are shuffled and appended; existing assignments never
+change. See DECISIONS.md (2026-10-08) for the deletion policy.
 """
 
 import argparse
@@ -27,6 +30,7 @@ SYSTEM_ACCOUNTS = {"AutoModerator"}  # Reddit infrastructure, not a person
 
 # What happens to an item, by Arctic Shift's _meta.removal_type.
 #   keep       text and author pass through (pseudonymized)
+#   review     as keep, flagged needs_review for case-by-case human review
 #   tombstone  structure kept (id, parent, thread, time); text and author nulled
 # Decided by Acacia 2026-10-08. A removal type missing here stops the run:
 # the authors assign it, it doesn't get a default.
@@ -34,6 +38,7 @@ POLICY = {
     None: "keep",
     "moderator": "keep",
     "deleted": "tombstone",
+    "reddit": "review",
 }
 
 FIELDS = ["id", "link_id", "parent_id", "created_utc", "score", "num_comments",
@@ -51,10 +56,13 @@ class UnsetPolicy(ValueError):
     pass
 
 
-def build_map(authors, seed):
-    people = sorted(a for a in authors if a and a != DELETED and a not in SYSTEM_ACCOUNTS)
-    random.Random(seed).shuffle(people)
-    return {a: f"C{i}" for i, a in enumerate(people, 1)}
+def extend_map(existing, authors, seed):
+    """Return `existing` plus pseudonyms for any new people in `authors`."""
+    new = sorted(a for a in authors if a and a != DELETED
+                 and a not in SYSTEM_ACCOUNTS and a not in existing)
+    random.Random(f"{seed}:{len(existing)}").shuffle(new)
+    start = len(existing)
+    return {**existing, **{a: f"C{start + i}" for i, a in enumerate(new, 1)}}
 
 
 def pseudonym(author, mapping):
@@ -84,6 +92,7 @@ def process_item(x, mapping, lower_map):
     out["was_deleted_later"] = bool(meta.get("was_deleted_later"))
     out["is_edited"] = bool(meta.get("is_edited"))
     out["excluded_reason"] = None
+    out["needs_review"] = action == "review"
 
     if action == "tombstone":
         out["author"] = None
@@ -159,17 +168,23 @@ def pseudonymize(snapshot, processed_root="data/processed", private_root="data/p
         raise UnsetPolicy(f"no policy for removal_type(s) {unset}; add to POLICY "
                           "after the authors decide, and record it in DECISIONS.md")
 
-    seed_path = os.path.join(priv_dir, "seed.txt")
+    seed_path = os.path.join(private_root, "seed.txt")
     if os.path.exists(seed_path):
-        seed = open(seed_path, encoding="utf-8").read().strip()
+        with open(seed_path, encoding="utf-8") as f:
+            seed = f.read().strip()
     else:
         seed = secrets.token_hex(16)
         with open(seed_path, "w", encoding="utf-8") as f:
             f.write(seed + "\n")
+    map_path = os.path.join(private_root, "pseudonyms.json")
+    existing = {}
+    if os.path.exists(map_path):
+        with open(map_path, encoding="utf-8") as f:
+            existing = json.load(f)
 
     authors = {x.get("author") for x in posts + comments}
     authors |= {w.get("revision_author") for w in wikis}
-    mapping = build_map(authors, seed)
+    mapping = extend_map(existing, authors, seed)
     lower_map = {a.lower(): p for a, p in mapping.items()}
 
     out = {
@@ -184,7 +199,7 @@ def pseudonymize(snapshot, processed_root="data/processed", private_root="data/p
 
     for name, records in out.items():
         write_jsonl(os.path.join(out_dir, f"{name}.jsonl"), records)
-    with open(os.path.join(priv_dir, "pseudonyms.json"), "w", encoding="utf-8") as f:
+    with open(map_path, "w", encoding="utf-8") as f:
         json.dump(mapping, f, indent=1, sort_keys=True)
     bare = bare_mentions(everything, mapping)
     with open(os.path.join(priv_dir, "bare_mentions.json"), "w", encoding="utf-8") as f:
@@ -193,6 +208,8 @@ def pseudonymize(snapshot, processed_root="data/processed", private_root="data/p
     report = {
         "snapshot": snapshot,
         "pseudonymized_authors": len(mapping),
+        "pseudonyms_new_this_run": len(mapping) - len(existing),
+        "needs_review": {k: sum(r["needs_review"] for r in out[k]) for k in ("posts", "comments")},
         "excluded_reason": {k: dict(Counter(str(r["excluded_reason"]) for r in out[k]))
                             for k in ("posts", "comments")},
         "removal_type": {k: dict(Counter(str(r["removal_type"]) for r in out[k]))

@@ -3,7 +3,7 @@ import json
 import pytest
 
 from facct27.collect import read_jsonl, write_jsonl
-from facct27.pseudonymize import UnsetPolicy, build_map, pseudonymize
+from facct27.pseudonymize import UnsetPolicy, extend_map, pseudonymize
 
 # Synthetic handles only; no real usernames in tests.
 POSTS = [
@@ -73,12 +73,40 @@ def test_unavailable_at_collection_and_system_accounts(run):
 
 def test_unassigned_removal_type_stops_the_run(run):
     odd = POSTS + [{"id": "p3", "author": "e", "created_utc": 6, "title": "t",
-                    "selftext": "", "_meta": {"removal_type": "reddit"}}]
+                    "selftext": "", "_meta": {"removal_type": "no_such_type"}}]
     with pytest.raises(UnsetPolicy):
         run(posts=odd)
 
 
-def test_map_is_stable_for_a_seed_and_ignores_activity():
-    authors = {"a", "b", "c", "d", "e"}
-    assert build_map(authors, "s1") == build_map(authors, "s1")
-    assert build_map(authors, "s1") != build_map(authors, "s2")
+def test_admin_removed_items_are_kept_and_flagged_for_review(run):
+    flagged = POSTS + [{"id": "p3", "author": "erin_v", "created_utc": 6, "title": "t",
+                        "selftext": "body", "_meta": {"removal_type": "reddit"}}]
+    p = run(posts=flagged)["posts"]
+    assert p["p3"]["needs_review"] and p["p3"]["selftext"] == "body"
+    assert p["p3"]["author"].startswith("C")
+    assert not p["p1"]["needs_review"]
+
+
+def test_existing_pseudonyms_never_change_when_authors_are_added():
+    first = extend_map({}, {"a", "b", "c"}, "s1")
+    assert extend_map(first, {"a", "b", "c"}, "s1") == first
+    later = extend_map(first, {"a", "b", "c", "d", "e"}, "s1")
+    assert {k: later[k] for k in first} == first
+    assert sorted(later.values()) == sorted(f"C{i}" for i in range(1, 6))
+
+
+def test_map_persists_across_snapshots(tmp_path):
+    def snap(name, authors):
+        d = tmp_path / "raw" / name
+        d.mkdir(parents=True)
+        write_jsonl(str(d / "posts.jsonl"), [
+            {"id": a, "author": a, "created_utc": 1, "title": "t", "selftext": "", "_meta": {}}
+            for a in authors])
+        write_jsonl(str(d / "comments.jsonl"), [])
+        (d / "wikis.json").write_text("[]")
+        pseudonymize(str(d), str(tmp_path / "processed"), str(tmp_path / "private"))
+        return json.loads((tmp_path / "private" / "pseudonyms.json").read_text())
+    first = snap("s1", ["ann_q", "ben_q"])
+    second = snap("s2", ["ben_q", "cat_q"])
+    assert second["ann_q"] == first["ann_q"] and second["ben_q"] == first["ben_q"]
+    assert "cat_q" in second
