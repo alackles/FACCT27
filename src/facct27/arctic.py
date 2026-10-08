@@ -24,14 +24,15 @@ class ApiTimeout(ApiError):
 
 
 class Client:
-    def __init__(self, min_interval=1.0, max_retries=5, session=None,
-                 sleep=time.sleep, clock=time.monotonic):
+    def __init__(self, min_interval=1.0, max_retries=8, session=None,
+                 sleep=time.sleep, clock=time.monotonic, log=print):
         self.min_interval = min_interval
         self.max_retries = max_retries
         self.session = session or requests.Session()
         self.session.headers["User-Agent"] = USER_AGENT
         self.sleep = sleep
         self.clock = clock
+        self.log = log
         self._last = None
         self.requests_made = 0
 
@@ -42,26 +43,41 @@ class Client:
                 self.sleep(remaining)
         self._last = self.clock()
 
+    def _backoff(self, attempt, why):
+        if attempt == self.max_retries:
+            return  # out of attempts; get() raises next
+        wait = min(120, 5 * 2 ** attempt)
+        self.log(f"  retry {attempt + 1}/{self.max_retries} in {wait}s ({why})", flush=True)
+        self.sleep(wait)
+
     def get(self, endpoint, params=None):
         """GET `endpoint` (e.g. "posts/search") and return the `data` field."""
         url = f"{BASE_URL}/{endpoint}"
+        last = None
         for attempt in range(self.max_retries + 1):
             self._wait_turn()
             self.requests_made += 1
             try:
                 resp = self.session.get(url, params=params, timeout=90)
-            except requests.RequestException:
+            except requests.RequestException as e:
                 if attempt == self.max_retries:
                     raise
-                self.sleep(2 ** attempt)
+                last = type(e).__name__
+                self._backoff(attempt, last)
                 continue
 
             if resp.status_code == 429:
+                last = "429"
                 reset = resp.headers.get("X-RateLimit-Reset", "")
-                self.sleep(float(reset) + 1 if reset.isdigit() else 2 ** attempt * 5)
+                if reset.isdigit() and attempt < self.max_retries:
+                    self.log(f"  rate limited; waiting {int(reset) + 1}s", flush=True)
+                    self.sleep(int(reset) + 1)
+                else:
+                    self._backoff(attempt, last)
                 continue
             if resp.status_code >= 500:
-                self.sleep(2 ** attempt)
+                last = str(resp.status_code)
+                self._backoff(attempt, last)
                 continue
 
             body = resp.json()
@@ -72,4 +88,5 @@ class Client:
                 raise ApiTimeout(error)
             raise ApiError(f"{resp.status_code} {error}")
 
-        raise ApiError(f"gave up on {endpoint} after {self.max_retries + 1} attempts")
+        raise ApiError(f"gave up on {endpoint} after {self.max_retries + 1} attempts "
+                       f"(last: {last})")
