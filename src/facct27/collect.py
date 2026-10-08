@@ -132,6 +132,10 @@ def collect(client, subreddit, after, before, out, page_size=100, log=print):
         raise SystemExit(f"{out} is a completed snapshot; choose a new --out")
     started = datetime.now(UTC).isoformat(timespec="seconds")
     windows = month_windows(after, before)
+    os.makedirs(out, exist_ok=True)
+    runs_path = os.path.join(out, "runs.jsonl")
+    with open(runs_path, "a", encoding="utf-8") as f:  # one line per (re)start
+        f.write(json.dumps({"started_utc": started, "commit": repo_commit()}) + "\n")
 
     counts = {}
     for kind in KINDS:
@@ -181,9 +185,10 @@ def collect(client, subreddit, after, before, out, page_size=100, log=print):
         "before_exclusive": before.isoformat(),
         "page_size": page_size,
         "started_utc": started,
+        "runs": read_jsonl(runs_path),
         "finished_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         "collector_commit": repo_commit(),
-        "requests_made": client.requests_made,
+        "requests_made_final_run": client.requests_made,
         "counts": counts,
         "totals": {k: sum(v.values()) for k, v in counts.items()},
         "expected_counts_time_series": expected,
@@ -206,7 +211,8 @@ def main(argv=None):
     p.add_argument("--out", required=True, help="snapshot dir, e.g. data/raw/2026-10-08")
     p.add_argument("--page-size", type=int, default=100)
     args = p.parse_args(argv)
-    collect(Client(), args.subreddit, args.after, args.before, args.out, args.page_size)
+    collect(Client(), args.subreddit, args.after, args.before, args.out, args.page_size,
+            log=lambda *a: print(*a, flush=True))
 
 
 if __name__ == "__main__":
