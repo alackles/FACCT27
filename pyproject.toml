@@ -1,0 +1,16 @@
+[project]
+name = "facct27"
+version = "0.1.0"
+description = "Data collection and analysis for the FAccT 2027 paper on r/ClaudeAIJailbreak"
+requires-python = ">=3.12"
+dependencies = ["requests>=2.31"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
