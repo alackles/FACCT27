@@ -39,6 +39,7 @@ POLICY = {
     "moderator": "keep",
     "deleted": "tombstone",
     "reddit": "review",
+    "removed": "keep",  # comments; mod or AutoModerator, not distinguished (2026-10-19)
 }
 
 FIELDS = ["id", "link_id", "parent_id", "created_utc", "score", "num_comments",
