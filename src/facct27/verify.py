@@ -25,7 +25,12 @@ def status_counts(items):
     c = Counter()
     for x in items:
         meta = x.get("_meta") or {}
-        c[f"removal_type={meta.get('removal_type')}"] += 1
+        rtype = meta.get("removal_type")
+        c[f"removal_type={rtype}"] += 1
+        # Whether a removal policy has any text to act on: was it captured first?
+        text = text_of(x)
+        status = text if text in (DELETED, REMOVED) else "present"
+        c[f"removal_type={rtype} & text={status}"] += 1
         c["was_deleted_later"] += bool(meta.get("was_deleted_later"))
         c["is_edited"] += bool(meta.get("is_edited"))
         c["no_second_fetch"] += "retrieved_2nd_on" not in meta
