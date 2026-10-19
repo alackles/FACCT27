@@ -100,3 +100,16 @@ def test_cli_end_to_end_on_toy_snapshot(tmp_path, capsys):
     report = json.loads(capsys.readouterr().out.split("\n", 1)[1])
     assert report["graph"]["nodes"] == nx.read_graphml(tmp_path / "net" / "graph.graphml").number_of_nodes()
     assert report["cuts"] and all("s_members" not in c for c in report["cuts"])
+
+
+def test_viz_payload_covers_every_node_and_tie(planted):
+    from facct27 import viz
+    *_, D, counts = planted
+    G = network.undirected(D)
+    data = viz.payload(D, G)
+    assert {n["id"] for n in data["nodes"]} == set(G)
+    assert len(data["links"]) == G.number_of_edges()
+    assert sum(c["size"] for c in data["clusters"]) == G.number_of_nodes()
+    html = viz.render({"x": "</script>"})  # a closing tag in the data can't end the block
+    blob = html.split('type="application/json">', 1)[1].split("</script>", 1)[0]
+    assert json.loads(blob) == {"x": "</script>"}
