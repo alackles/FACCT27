@@ -40,6 +40,8 @@ POLICY = {
     "deleted": "tombstone",
     "reddit": "review",
     "removed": "keep",  # comments; mod or AutoModerator, not distinguished (2026-10-19)
+    "content_takedown": "review",  # posts; Reddit-side removals, as for "reddit"
+    "removed by reddit": "review",  # comments; (2026-10-19)
 }
 
 FIELDS = ["id", "link_id", "parent_id", "created_utc", "score", "num_comments",
