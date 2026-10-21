@@ -4,6 +4,33 @@ Questions set aside for human thought. They aren't tasks for Claude, and nothing
 
 Figures are from `verify` on the 2026-10-08 snapshot, run 2026-10-19.
 
+## To look at: the June 2026 hub surge
+
+Seen 2026-10-21 in the ER month view (`--months --track 7`). In May and July 2026, C653 is the only ER hub. In June, a dozen or more other hubs appear alongside it: C1929 (a moderator, a hub only in June), C2713, C1211, C2914, and others. Two kinds of shape are involved. One is a dense region east of C653 where people tied together across the whole period are busy among themselves. The other is small stars at the edge of the layout, which most likely means June-only hubs whose repliers barely appear in any other month (inferred from how the whole-period layout places people).
+
+C653, from the card (contexts-weighted). M is derived as in-degree ÷ share, so it is only good to about ±5:
+
+| | C653 in-degree | Share | Repliers | M (derived) | Everyone else |
+|---|---|---|---|---|---|
+| 2026-05 | 571 | 27.2% | 408 | ~2,100 | ~1,530 |
+| 2026-06 | 508 | 20.9% | 381 | ~2,430 | ~1,920 |
+| 2026-07 | 435 | 25.3% | 333 | ~1,720 | ~1,280 |
+
+Reading so far (Claude's, to check):
+- C653's in-degree falls steadily, by about a quarter over two months. Repeat engagement per replier barely changes, so the loss is in repliers.
+- June's drop in share is mostly the rest of the network growing (about +400 contexts against −60 for C653): new activity on top, with a modest decline at the center.
+- July's recovery in share is relative. C653 fell again, but the June surge elsewhere fell faster.
+- So far this looks like a shrinking single center with a one-month surge around it, not attention moving away from C653 and back.
+
+Next checks, cheapest first:
+1. Add up the in-degree of June's other ER hubs from the sidebar. Most of the ~+400 means the surge was concentrated in those hubs; a small part means it was spread thinly.
+2. Compare May and June M in the monthly figure's strips. If they're similar, May (one hub) against June (many) is roughly volume-matched, and June isn't a volume effect.
+3. Click C1929 in June: are its repliers eastern-region regulars or newcomers?
+4. Newcomer share: the fraction of June's active people who first appear in June. This needs a small count-only addition to `hubs.py`, which Claude can build.
+5. Is the July→August shift you saw in the monthly grid a separate event from June, or the same one seen through a different measure?
+
+Caveat: the other six tracked hubs (C1923, C2534, C3456, C973, C3286, C3937) are the earliest hubs. They come from small early months and sit together at the edge of the layout. Check those months' strips for ER-wins flags before reading anything into them.
+
 ## To look at: Gomory–Hu cuts (Kirkley CM candidates)
 
 The run is done (Reference, step 2), and the output is in `data/derived/2026-10-08/network-kirkley/`. `cut_summary` and the satellite list (each candidate's cut from the top hub) have been summarized, but you haven't looked at the cuts yourself yet. Known problem: the report's `cuts` list keeps every non-degenerate pair, about 75k rows, so `report.json` is 14.5 MB. The informative measures are the smaller side's size and cut ÷ strength, not the degenerate flag, which misses "candidate plus private following" cuts. `gomory_hu.json` (pseudonyms and cut values) is what a look at satellite subtrees would need.
