@@ -4,6 +4,26 @@ Questions set aside for human thought. They aren't tasks for Claude, and nothing
 
 Figures are from `verify` on the 2026-10-08 snapshot, run 2026-10-19.
 
+## To run: Kirkley hub analysis (added 2026-10-21)
+
+The code is built and tested on synthetic data only (plan: `docs/plans/2026-10-21-kirkley-hub-identification.md`; decisions: DECISIONS rows dated 2026-10-21). It hasn't touched the corpus. Run from `FACCT27-workflow/`:
+
+1. `uv run pytest` should show 54 passing.
+2. Hubs by month and cumulatively:
+   `uv run python -m facct27.hubs data/processed/2026-10-08 --out data/derived/2026-10-08/hubs`
+   This prints the primary table (in-degree, contexts-weighted, CM hubs). `hubs.csv` holds all four variants (in/out × contexts/unweighted), and `hubs.json` adds the hub lists.
+3. Pole-candidate cuts with Kirkley hubs as the candidates:
+   `uv run python -m facct27.network data/processed/2026-10-08 --out data/derived/2026-10-08/network-kirkley --candidates kirkley`
+   Look at the `candidates` block. If `h` is 1, there are no candidate pairs, and that is itself the result.
+4. Share back only the printed hubs table, `hubs.csv` if you want the secondary runs looked at, and the network report's `candidates` and `cuts` blocks. All of these are counts and pseudonyms.
+
+Reading the table:
+- `ER<CM = yes` marks a window where ER compressed better, i.e. outside the regime where CM is guaranteed to win. Treat that window's *h*\* as low-confidence.
+- *h*\* = 0 means the data don't justify hubs at that window's size. It isn't evidence that there are none.
+- `*` after a pseudonym marks a moderator.
+
+Flag: a table in which one pseudonym is the hub every month makes that person easy to identify for anyone who knows the community. It's part of the open naming decision with Elliott.
+
 ## Missing comments and orphaned replies
 
 The collected comments fall 37 short of Arctic Shift's `time_series` counts, 0.18% of 20,877. By month: 2026-02 −1, 03 −3, 05 −3, 06 −5, 07 −13, 08 −8, 09 −4. Posts and all other months match. Separately, 23 comments reply to a parent comment that isn't in the corpus.
