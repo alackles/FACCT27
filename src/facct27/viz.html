@@ -415,6 +415,14 @@ if (hubMode) {
     '<div>Numbers in the hub list = in-degree (thread contexts)</div>';
   showCard();
 }
+// Time window, if one was given: shown in the summary, and leading the tab title so
+// month-by-month files can be told apart.
+if (data.meta.start != null || data.meta.end != null) {
+  const day = t => t == null ? "…" : new Date(t * 1000).toISOString().slice(0, 10);
+  document.getElementById("summary").textContent +=
+    ` · window: ${day(data.meta.start)} to ${day(data.meta.end)} (end exclusive)`;
+  document.title = `${day(data.meta.start)} · ${document.title}`;
+}
 
 document.getElementById("search").addEventListener("change", e => {
   const n = byId.get(e.target.value.trim());
