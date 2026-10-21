@@ -107,6 +107,58 @@ def test_single_kirkley_hub_reports_no_candidate_pairs():
     assert report["candidates"]["note"] == "no candidate pairs" and cuts == []
 
 
+def test_gomory_hu_tree_gives_every_karate_cut_and_zacharys_split():
+    G, names, U = karate()
+    nodes = sorted(U)
+    strength = dict(U.degree(weight="weight"))
+    F = network.gomory_hu(U)
+    from_tree = {(r["s"], r["t"]): r["cut"] for r in network.tree_cuts(F, nodes, strength)}
+    pairwise = {(r["s"], r["t"]): r["cut"] for r in network.cut_pairs(U, nodes)}
+    assert len(from_tree) == 561 and from_tree == pairwise
+    hi, _ = network.tree_partition(F, names[0], names[33])
+    wrong = [v for v in G if (names[v] in hi) != (G.nodes[v]["club"] == "Mr. Hi")]
+    assert wrong == [8]
+
+
+def test_tree_cuts_match_pairwise_cuts_on_planted_toy(planted):
+    *_, truth, D, counts = planted
+    U = network.undirected(D)
+    poles = ["C1001", "C2001", truth["instant"]["post"], "C1005", "C2007"]
+    keep = ("s", "t", "connected", "cut", "s_side", "t_side", "no_better_than_isolating")
+    pairwise = [{k: r[k] for k in keep} for r in network.cut_pairs(U, poles)]
+    tree = [{k: r[k] for k in keep}
+            for r in network.tree_cuts(network.gomory_hu(U), poles,
+                                       dict(U.degree(weight="weight")))]
+    assert tree == pairwise
+    hubs = next(r for r in tree if (r["s"], r["t"]) == ("C1001", "C2001"))
+    assert hubs["cut"] == truth["cross_edges"]
+
+
+def test_tree_cuts_across_components_are_not_connected():
+    U = nx.Graph()
+    U.add_weighted_edges_from([("a", "b", 2), ("b", "c", 1), ("x", "y", 3)])
+    F = network.gomory_hu(U)
+    assert nx.number_connected_components(F) == 2
+    rows = {(r["s"], r["t"]): r for r in network.tree_cuts(F, "abcxy", dict(U.degree(weight="weight")))}
+    assert not rows[("a", "x")]["connected"] and rows[("a", "c")]["cut"] == 1
+    assert (rows[("a", "c")]["s_side"], rows[("a", "c")]["t_side"]) == (2, 1)
+
+
+def test_cli_tree_cuts_end_to_end(tmp_path, capsys):
+    toy.main([str(tmp_path / "toy")])
+    network.main([str(tmp_path / "toy"), "--out", str(tmp_path / "net"),
+                  "--candidates", "kirkley", "--cuts", "tree"])
+    capsys.readouterr()
+    report = json.loads((tmp_path / "net" / "report.json").read_text())
+    cuts = json.loads((tmp_path / "net" / "cuts.json").read_text())
+    forest = json.loads((tmp_path / "net" / "gomory_hu.json").read_text())
+    assert len(forest) == report["graph"]["nodes"] - report["graph"]["components"]
+    s = report["cut_summary"]
+    assert (s["method"], s["pairs"]) == ("tree", len(cuts))
+    assert s["degenerate"] == sum(c.get("no_better_than_isolating", False) for c in cuts)
+    assert not any(k.endswith("_members") for c in cuts for k in c)
+
+
 def test_mention_layer_links_mentioner_to_mentioned(planted):
     posts, comments, truth, *_ = planted
     M, _ = network.build(posts, comments, layer="mention")

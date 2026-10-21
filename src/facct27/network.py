@@ -4,7 +4,8 @@
 
 Uses author, id, parent, thread, time and flag fields, plus text only for u/C…
 mentions under --layer mention. Prints counts and pseudonyms only, so the report
-is safe to paste. Writes graph.graphml, cuts.json and report.json to --out.
+is safe to paste. Writes graph.graphml, cuts.json and report.json to --out, plus
+gomory_hu.json under --cuts tree.
 Edge rules are recorded in docs/DECISIONS.md (2026-10-19).
 """
 
@@ -18,6 +19,7 @@ from collections import Counter
 from datetime import datetime, timezone
 
 import networkx as nx
+from networkx.algorithms.flow import edmonds_karp
 
 from facct27 import kirkley
 from facct27.collect import read_jsonl
@@ -168,6 +170,98 @@ def cut_pairs(G, poles):
     return rows
 
 
+def gomory_hu(G):
+    """Gomory-Hu forest of G: one tree per connected component, edge weight = cut.
+
+    The min s-t cut in G is the lightest edge on the tree path from s to t, and
+    deleting that edge splits the tree into a minimum cut. Needs n - 1 max-flows,
+    not one per pair. capacity must be named: networkx reads a missing capacity
+    attribute as infinite.
+    """
+    F = nx.Graph()
+    for nodes in nx.connected_components(G):
+        if len(nodes) > 1:
+            F.update(nx.gomory_hu_tree(G.subgraph(nodes), capacity="weight",
+                                       flow_func=edmonds_karp))
+    return F
+
+
+def _rooted(F):
+    """Per node: component root, entry/exit order and subtree size, rooting each tree
+    at its smallest node, so membership in a subtree is an interval test."""
+    root, tin, tout, size = {}, {}, {}, {}
+    clock = 0
+    for r in sorted(min(c) for c in nx.connected_components(F)):
+        stack, seen = [(r, iter(sorted(F[r])))], {r}
+        root[r], tin[r] = r, clock
+        clock += 1
+        while stack:
+            v, children = stack[-1]
+            c = next((c for c in children if c not in seen), None)
+            if c is None:
+                stack.pop()
+                tout[v] = clock
+                size[v] = 1 + sum(size[c] for c in F[v] if tin[c] > tin[v])
+            else:
+                seen.add(c)
+                root[c], tin[c] = r, clock
+                clock += 1
+                stack.append((c, iter(sorted(F[c]))))
+    return root, tin, tout, size
+
+
+def _lightest_edges(F, s):
+    """For every node t in s's tree: (cut, u, v), the lightest edge on the path from
+    s, taking the one nearest s when several tie."""
+    best, stack = {s: None}, [s]
+    while stack:
+        x = stack.pop()
+        for y, e in F[x].items():
+            if y not in best:
+                w = e["weight"]
+                best[y] = (w, x, y) if best[x] is None or w < best[x][0] else best[x]
+                stack.append(y)
+    return best
+
+
+def tree_cuts(F, poles, strength):
+    """cut_pairs rows from a Gomory-Hu forest, without member lists.
+
+    One traversal per pole instead of one max-flow per pair. Side sizes come from
+    subtree sizes: deleting edge (u, v) cuts off the subtree of whichever end is
+    the child in the rooted tree.
+    """
+    root, tin, tout, size = _rooted(F)
+    comp = {r: sum(1 for v in root if root[v] == r) for r in set(root.values())}
+    rows = []
+    poles = sorted(poles)
+    for i, s in enumerate(poles):
+        best = _lightest_edges(F, s) if s in F else {}
+        for t in poles[i + 1:]:
+            row = {"s": s, "t": t, "s_strength": strength[s], "t_strength": strength[t]}
+            if t not in best:
+                row.update(connected=False)
+            else:
+                cut, u, v = best[t]
+                child = v if tin[v] > tin[u] else u
+                below = tin[child] <= tin[s] < tout[child]
+                s_side = size[child] if below else comp[root[s]] - size[child]
+                row.update(connected=True, cut=cut, s_side=s_side,
+                           t_side=comp[root[s]] - s_side,
+                           no_better_than_isolating=cut >= min(strength[s], strength[t]))
+            rows.append(row)
+    return rows
+
+
+def tree_partition(F, s, t):
+    """(s side, t side) of the minimum s-t cut that the forest encodes."""
+    cut, u, v = _lightest_edges(F, s)[t]
+    H = F.copy()
+    H.remove_edge(u, v)
+    S = nx.node_connected_component(H, s)
+    return sorted(S), sorted(nx.node_connected_component(H, t))
+
+
 def kirkley_candidates(D, weight="contexts"):
     """CM in-hubs (Kirkley 2024) on in-degree weighted by `weight`, as pole candidates."""
     r = kirkley.scan(dict(D.in_degree(weight=weight)), weighted=True)
@@ -179,7 +273,7 @@ def kirkley_candidates(D, weight="contexts"):
 
 def analyze(posts, comments, layer="reply", weight="contexts", start=None, end=None,
             needs_review=True, mod_actions=True, k=5, betweenness_sample=None,
-            candidates="topk"):
+            candidates="topk", cuts="pairs"):
     D, counts = build(posts, comments, layer, start, end, needs_review, mod_actions)
     G = undirected(D, weight)
     scores = centrality(D, G, weight, betweenness_sample)
@@ -190,12 +284,17 @@ def analyze(posts, comments, layer="reply", weight="contexts", start=None, end=N
         poles, chosen = kirkley_candidates(D, weight)
     else:
         poles, chosen = set().union(*tops.values()), {"rule": "topk", "k": k}
-    cuts = cut_pairs(G, poles)
+    if cuts == "tree":
+        forest = gomory_hu(G)
+        rows = tree_cuts(forest, poles, dict(G.degree(weight="weight")))
+    else:
+        forest, rows = None, cut_pairs(G, poles)
     sizes = sorted((len(c) for c in nx.connected_components(G)), reverse=True)
     report = {
         "params": {"layer": layer, "weight": weight, "start": start, "end": end,
                    "needs_review": needs_review, "mod_actions": mod_actions, "top_k": k,
-                   "betweenness_sample": betweenness_sample, "candidates": candidates},
+                   "betweenness_sample": betweenness_sample, "candidates": candidates,
+                   "cuts": cuts},
         "edge_rules": dict(sorted(counts.items())),
         "graph": {"nodes": D.number_of_nodes(), "directed_edges": D.number_of_edges(),
                   "undirected_edges": G.number_of_edges(), "components": len(sizes),
@@ -205,18 +304,31 @@ def analyze(posts, comments, layer="reply", weight="contexts", start=None, end=N
         "candidates": chosen,
         "top": {name: [[v, round(scores[name][v], 6), D.nodes[v]["mod"]] for v in vs]
                 for name, vs in tops.items()},
-        "cuts": [{k: v for k, v in c.items() if not k.endswith("_members")} for c in cuts],
+        "cut_summary": {
+            "method": cuts, "pairs": len(rows),
+            "connected": sum(1 for c in rows if c["connected"]),
+            "degenerate": sum(1 for c in rows if c.get("no_better_than_isolating")),
+            "listed": "all pairs" if cuts == "pairs" else "non-degenerate pairs only"},
+        "cuts": [{k: v for k, v in c.items() if not k.endswith("_members")} for c in rows
+                 if cuts == "pairs" or (c["connected"] and not c["no_better_than_isolating"])],
     }
-    return D, report, cuts
+    if forest is not None:
+        D.graph["gomory_hu"] = forest
+    return D, report, rows
 
 
 def write(out, D, report, cuts):
     os.makedirs(out, exist_ok=True)
     H = D.copy()
+    H.graph.pop("gomory_hu", None)
     for _, _, e in H.edges(data=True):
         del e["threads"]  # GraphML has no sets; contexts carries the count
     nx.write_graphml(H, os.path.join(out, "graph.graphml"))
-    for name, obj in (("report.json", report), ("cuts.json", cuts)):
+    outputs = [("report.json", report), ("cuts.json", cuts)]
+    if "gomory_hu" in D.graph:
+        outputs.append(("gomory_hu.json", sorted([min(u, v), max(u, v), w] for u, v, w
+                                                in D.graph["gomory_hu"].edges(data="weight"))))
+    for name, obj in outputs:
         with open(os.path.join(out, name), "w", encoding="utf-8") as f:
             json.dump(obj, f, indent=1)
 
@@ -238,6 +350,9 @@ def main(argv=None):
     p.add_argument("--top", type=int, default=5, help="candidates per centrality measure")
     p.add_argument("--candidates", choices=["topk", "kirkley"], default="topk",
                    help="pole candidates: top-k per measure, or Kirkley CM in-hubs")
+    p.add_argument("--cuts", choices=["pairs", "tree"], default="pairs",
+                   help="one max-flow per pair, or all pairs from a Gomory-Hu tree "
+                        "(writes gomory_hu.json; no member lists)")
     p.add_argument("--betweenness-sample", type=int,
                    help="approximate betweenness from this many sources (default: exact)")
     a = p.parse_args(argv)
@@ -247,7 +362,7 @@ def main(argv=None):
     comments = read_jsonl(os.path.join(a.snapshot, "comments.jsonl"))
     D, report, cuts = analyze(posts, comments, a.layer, a.weight, a.start, a.end,
                               not a.exclude_needs_review, not a.exclude_mod_actions,
-                              a.top, a.betweenness_sample, a.candidates)
+                              a.top, a.betweenness_sample, a.candidates, a.cuts)
     report = {"snapshot": a.snapshot, **report, "seconds": round(time.time() - began, 1)}
     write(a.out, D, report, cuts)
     print(json.dumps(report, indent=2))
