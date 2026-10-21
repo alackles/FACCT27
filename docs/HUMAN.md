@@ -46,7 +46,8 @@ Plan: `docs/plans/2026-10-21-kirkley-hub-identification.md`. Decisions: the DECI
    `uv run python -m facct27.viz data/processed/2026-10-08 --out data/derived/2026-10-08/network-hubs-ER.html --groups ER`
    `uv run python -m facct27.viz data/processed/2026-10-08 --out data/derived/2026-10-08/network-hubs-CM.html --groups CM`
    **By month:** add `--months` for a month selector (‹ › or the arrow keys) over the same fixed layout: each month lights who was active and lists that month's hubs, and a chosen hub is followed from month to month.
-   `uv run python -m facct27.viz data/processed/2026-10-08 --out data/derived/2026-10-08/network-hubs-ER-months.html --groups ER --months`
+   `uv run python -m facct27.viz data/processed/2026-10-08 --out data/derived/2026-10-08/network-hubs-ER-months.html --groups ER --months --track 7`
+   `--track 7` gives the first seven people to become ER hubs a fixed color each (filled = hub that month, ring = active but not a hub), and every other hub that month is dark grey. The sidebar lists the seven with their status each month.
    `uv run python -m facct27.viz data/processed/2026-10-08 --out data/derived/2026-10-08/network-hubs-CM-months.html --groups CM --months`
    Separate files per window (each with its own layout) still work with `--start`/`--end`.
 
