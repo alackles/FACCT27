@@ -12,10 +12,11 @@ The code is built and tested on synthetic data only (plan: `docs/plans/2026-10-2
 2. Hubs by month and cumulatively:
    `uv run python -m facct27.hubs data/processed/2026-10-08 --out data/derived/2026-10-08/hubs`
    This prints the primary table (in-degree, contexts-weighted, CM hubs). `hubs.csv` holds all four variants (in/out × contexts/unweighted), and `hubs.json` adds the hub lists.
-3. Pole-candidate cuts with Kirkley hubs as the candidates:
-   `uv run python -m facct27.network data/processed/2026-10-08 --out data/derived/2026-10-08/network-kirkley --candidates kirkley`
-   Look at the `candidates` block. If `h` is 1, there are no candidate pairs, and that is itself the result.
-4. Share back only the printed hubs table, `hubs.csv` if you want the secondary runs looked at, and the network report's `candidates` and `cuts` blocks. All of these are counts and pseudonyms.
+   *Rerun (updated 2026-10-21):* the printed table now shows ER and CM hubs, in-degree then out-degree. Only the printing changed, so rerun the same command; it takes seconds.
+3. Pole-candidate cuts with Kirkley (CM) hubs as the candidates, computed from a Gomory–Hu tree. Don't run this without `--cuts tree`: 492 candidates means ~120k pairs.
+   `uv run python -m facct27.network data/processed/2026-10-08 --out data/derived/2026-10-08/network-kirkley --candidates kirkley --cuts tree`
+   Expected runtime: the tree took 12 s on a synthetic graph of similar size. Betweenness and closeness for the report run as before. (ER finds one hub, so no candidate pairs; that's read straight from the hubs output and needs no run.)
+4. Share back the printed hubs tables, `hubs.csv`/`hubs.json` if you want the secondary runs looked at, and the network report's `candidates` and `cut_summary` blocks plus its `cuts` (non-degenerate pairs only). `gomory_hu.json` (pseudonyms and cut values) is what any look at satellite subtrees would need. All of these are counts and pseudonyms.
 
 Reading the table:
 - `ER<CM = yes` marks a window where ER compressed better, i.e. outside the regime where CM is guaranteed to win. Treat that window's *h*\* as low-confidence.
