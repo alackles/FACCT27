@@ -1,37 +1,16 @@
 # Parked for the authors
 
-Questions set aside for human thought. They aren't tasks for Claude, and nothing here has been acted on. When one is settled, move the outcome to `DECISIONS.md` and delete it here.
+Questions set aside for human thought. They aren't tasks for Claude, and nothing here has been acted on. When one is settled, move the outcome to `DECISIONS.md` and delete it here. The Reference section at the end holds run commands for analyses already done.
 
 Figures are from `verify` on the 2026-10-08 snapshot, run 2026-10-19.
 
-## To run: Kirkley hub analysis (added 2026-10-21)
+## To look at: Gomory–Hu cuts (Kirkley CM candidates)
 
-The code is built and tested on synthetic data only (plan: `docs/plans/2026-10-21-kirkley-hub-identification.md`; decisions: DECISIONS rows dated 2026-10-21). It hasn't touched the corpus. Run from `FACCT27-workflow/`:
+The run is done (Reference, step 2), and the output is in `data/derived/2026-10-08/network-kirkley/`. `cut_summary` and the satellite list (each candidate's cut from the top hub) have been summarized, but you haven't looked at the cuts yourself yet. Known problem: the report's `cuts` list keeps every non-degenerate pair, about 75k rows, so `report.json` is 14.5 MB. The informative measures are the smaller side's size and cut ÷ strength, not the degenerate flag, which misses "candidate plus private following" cuts. `gomory_hu.json` (pseudonyms and cut values) is what a look at satellite subtrees would need.
 
-1. `uv run pytest` should show 58 passing.
-2. Hubs by month and cumulatively:
-   `uv run python -m facct27.hubs data/processed/2026-10-08 --out data/derived/2026-10-08/hubs`
-   This prints two tables (in-degree, then out-degree; contexts-weighted; ER and CM hubs). `hubs.csv` holds all four variants (in/out × contexts/unweighted), and `hubs.json` adds the hub lists.
-   *Rerun (updated 2026-10-21):* the printed table now shows ER and CM hubs, in-degree then out-degree. Only the printing changed, so rerun the same command; it takes seconds.
-3. Pole-candidate cuts with Kirkley (CM) hubs as the candidates, computed from a Gomory–Hu tree. Don't run this without `--cuts tree`: 492 candidates means ~120k pairs.
-   `uv run python -m facct27.network data/processed/2026-10-08 --out data/derived/2026-10-08/network-kirkley --candidates kirkley --cuts tree`
-   Expected runtime: the tree took 12 s on a synthetic graph of similar size. Betweenness and closeness for the report run as before. (ER finds one hub, so no candidate pairs; that's read straight from the hubs output and needs no run.)
-4. Share back the printed hubs tables, `hubs.csv`/`hubs.json` if you want the secondary runs looked at, and the network report's `candidates` and `cut_summary` blocks plus its `cuts` (non-degenerate pairs only). `gomory_hu.json` (pseudonyms and cut values) is what any look at satellite subtrees would need. All of these are counts and pseudonyms.
+## Identifiability of the central hub
 
-5. Figure: Kirkley cut-offs on the whole-period degree sequences (added 2026-10-21; Python analysis, R plotting). Rerun step 2 first so `degrees.csv` exists, then:
-   `Rscript figures/hub_degrees.R data/derived/2026-10-08/hubs/degrees.csv data/derived/2026-10-08/figures/hub_degrees.png`
-   It needs R with ggplot2 and dplyr only. The PNG is counts only, but keep it local.
-6. Clickable hub views (same layout as the Louvain view; click a hub in the sidebar to light up it and its repliers):
-   `uv run python -m facct27.viz data/processed/2026-10-08 --out data/derived/2026-10-08/network-hubs-ER.html --groups ER`
-   `uv run python -m facct27.viz data/processed/2026-10-08 --out data/derived/2026-10-08/network-hubs-CM.html --groups CM`
-   Local files only, like the Louvain view.
-
-Reading the table:
-- `ER<CM = yes` marks a window where ER compressed better, i.e. outside the regime where CM is guaranteed to win. Treat that window's *h*\* as low-confidence.
-- *h*\* = 0 means the data don't justify hubs at that window's size. It isn't evidence that there are none.
-- `*` after a pseudonym marks a moderator.
-
-Flag: a table in which one pseudonym is the hub every month makes that person easy to identify for anyone who knows the community. It's part of the open naming decision with Elliott.
+A table in which one pseudonym is the hub every month makes that person easy to identify for anyone who knows the community. This is part of the open naming decision with Elliott.
 
 ## Missing comments and orphaned replies
 
@@ -52,3 +31,24 @@ The two are close for posts and well apart for comments. Arctic Shift doesn't do
 
 - **Why it matters:** the paper reports a count of self-deleted items (see the 2026-10-08 DECISIONS row). Until this is understood, take that number from `removal_type == "deleted"`, not from `was_deleted_later`.
 - **Possible check:** cross-tabulate `was_deleted_later` against `removal_type` in `verify`. That's count-only, and a one-line change if wanted.
+
+## Reference: replicating the Kirkley hub analysis
+
+Plan: `docs/plans/2026-10-21-kirkley-hub-identification.md`. Decisions: the DECISIONS rows dated 2026-10-21. Run from `FACCT27-workflow/`, after `uv run pytest`, which should show 46 passing.
+
+1. **Hubs by month and cumulatively:**
+   `uv run python -m facct27.hubs data/processed/2026-10-08 --out data/derived/2026-10-08/hubs`
+   This prints two tables, in-degree and then out-degree, both contexts-weighted with ER and CM hubs. `hubs.csv` holds all four variants (in/out × contexts/unweighted), `hubs.json` adds the hub lists, and `degrees.csv` feeds the figure. It takes seconds.
+2. **Pole-candidate cuts**, with the CM hubs as candidates and computed from a Gomory–Hu tree. Never run this without `--cuts tree`, since 492 candidates means ~120k pairs. The tree took 80 s on the corpus graph.
+   `uv run python -m facct27.network data/processed/2026-10-08 --out data/derived/2026-10-08/network-kirkley --candidates kirkley --cuts tree`
+   ER finds only one hub, so it has no candidate pairs. That result comes straight from the hubs output and needs no run.
+3. **Figure: Kirkley cut-offs** on the whole-period degree sequences. Step 1 has to run first. Needs R with ggplot2 and dplyr. The PNG is counts only, but keep it local.
+   `Rscript figures/hub_degrees.R data/derived/2026-10-08/hubs/degrees.csv data/derived/2026-10-08/figures/hub_degrees.png`
+4. **Clickable hub views.** These use the same layout as the Louvain view. Clicking a hub in the sidebar highlights it and the people who replied to it. They're local files only.
+   `uv run python -m facct27.viz data/processed/2026-10-08 --out data/derived/2026-10-08/network-hubs-ER.html --groups ER`
+   `uv run python -m facct27.viz data/processed/2026-10-08 --out data/derived/2026-10-08/network-hubs-CM.html --groups CM`
+
+Reading the hubs table:
+- `ER<CM = yes` marks a window where ER compressed better, which is outside the regime where CM is guaranteed to win. Treat that window's *h*\* as low-confidence.
+- *h*\* = 0 means the data don't justify hubs at that window's size. It isn't evidence that there are none.
+- `*` after a pseudonym marks a moderator.

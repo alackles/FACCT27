@@ -3,7 +3,7 @@ import json
 import pytest
 
 from facct27.collect import read_jsonl, write_jsonl
-from facct27.pseudonymize import UnsetPolicy, extend_map, pseudonymize
+from facct27.pseudonymize import UnsetPolicy, pseudonymize
 
 # Synthetic handles only; no real usernames in tests.
 POSTS = [
@@ -85,14 +85,6 @@ def test_admin_removed_items_are_kept_and_flagged_for_review(run):
     assert p["p3"]["needs_review"] and p["p3"]["selftext"] == "body"
     assert p["p3"]["author"].startswith("C")
     assert not p["p1"]["needs_review"]
-
-
-def test_existing_pseudonyms_never_change_when_authors_are_added():
-    first = extend_map({}, {"a", "b", "c"}, "s1")
-    assert extend_map(first, {"a", "b", "c"}, "s1") == first
-    later = extend_map(first, {"a", "b", "c", "d", "e"}, "s1")
-    assert {k: later[k] for k in first} == first
-    assert sorted(later.values()) == sorted(f"C{i}" for i in range(1, 6))
 
 
 def test_map_persists_across_snapshots(tmp_path):

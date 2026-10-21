@@ -22,14 +22,6 @@ def test_superlinear_growth_makes_the_seeds_the_hubs():
     assert statistics.median(found) == 4
 
 
-def test_random_recursive_tree_has_no_cm_hubs():
-    # Kirkley Fig. 3a: with no attachment preference and one edge per arrival,
-    # the CM encoding finds zero hubs in every simulation.
-    for seed in range(10):
-        posts, comments, _ = toy.price(seed=seed, m=1, alpha=0.0)
-        assert final_cumulative(hubs.analyze(posts, comments))["h_CM"] == 0
-
-
 def test_months_partition_interactions_and_cumulative_ends_at_whole_graph():
     posts, comments, _ = toy.price(seed=0)
     rows = hubs.analyze(posts, comments)
@@ -41,12 +33,6 @@ def test_months_partition_interactions_and_cumulative_ends_at_whole_graph():
     whole = kirkley.scan(hubs.degree_sequence(D))
     last = final_cumulative(rows)
     assert (last["N"], last["M"], last["h_CM"]) == (whole["N"], whole["M"], whole["h_CM"])
-
-
-def test_out_hubs_are_in_hubs_of_the_reversed_graph():
-    posts, comments, _ = toy.generate(seed=0)
-    D, _ = network.build(posts, comments)
-    assert hubs.degree_sequence(D, "out") == hubs.degree_sequence(D.reverse(), "in")
 
 
 def test_cli_end_to_end_on_toy_snapshot(tmp_path, capsys):

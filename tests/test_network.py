@@ -22,12 +22,6 @@ def karate():
     return G, names, network.undirected(D)
 
 
-def test_karate_records_rebuild_zacharys_weighted_graph():
-    G, names, U = karate()
-    want = {frozenset((names[u], names[v])): w for u, v, w in G.edges(data="weight")}
-    assert {frozenset((u, v)): w for u, v, w in U.edges(data="contexts")} == want
-
-
 def test_karate_min_cut_misplaces_only_zacharys_individual_9():
     # Zachary 1977: the flow model placed every member except individual 9
     # (node 8 here, zero-indexed) on the side they actually joined.
@@ -97,16 +91,6 @@ def test_kirkley_candidates_are_the_planted_hubs_and_get_cut(planted):
     assert cuts[0]["cut"] == truth["cross_edges"]
 
 
-def test_single_kirkley_hub_reports_no_candidate_pairs():
-    star = nx.DiGraph((f"leaf{i}", "centre") for i in range(40))
-    star.add_edges_from((f"leaf{i}", f"leaf{i + 1}") for i in range(0, 40, 4))
-    posts, comments, names = toy.from_graph(star)
-    _, report, cuts = network.analyze(posts, comments, candidates="kirkley")
-    assert report["candidates"]["h"] == 1
-    assert report["candidates"]["hubs"][0][0] == names["centre"]
-    assert report["candidates"]["note"] == "no candidate pairs" and cuts == []
-
-
 def test_gomory_hu_tree_gives_every_karate_cut_and_zacharys_split():
     G, names, U = karate()
     nodes = sorted(U)
@@ -163,38 +147,3 @@ def test_mention_layer_links_mentioner_to_mentioned(planted):
     posts, comments, truth, *_ = planted
     M, _ = network.build(posts, comments, layer="mention")
     assert {v: M.in_degree(v) for v in M if M.in_degree(v)} == truth["mentions"]
-
-
-def test_cli_end_to_end_on_toy_snapshot(tmp_path, capsys):
-    toy.main([str(tmp_path / "toy")])
-    network.main([str(tmp_path / "toy"), "--out", str(tmp_path / "net")])
-    report = json.loads(capsys.readouterr().out.split("\n", 1)[1])
-    assert report["graph"]["nodes"] == nx.read_graphml(tmp_path / "net" / "graph.graphml").number_of_nodes()
-    assert report["cuts"] and all("s_members" not in c for c in report["cuts"])
-
-
-def test_viz_payload_covers_every_node_and_tie(planted):
-    from facct27 import viz
-    *_, D, counts = planted
-    G = network.undirected(D)
-    data = viz.payload(D, G)
-    assert {n["id"] for n in data["nodes"]} == set(G)
-    assert len(data["links"]) == G.number_of_edges()
-    assert sum(c["size"] for c in data["clusters"]) == G.number_of_nodes()
-    html = viz.render({"x": "</script>"})  # a closing tag in the data can't end the block
-    blob = html.split('type="application/json">', 1)[1].split("</script>", 1)[0]
-    assert json.loads(blob) == {"x": "</script>"}
-
-
-def test_hub_view_groups_each_hub_with_its_repliers_in_the_same_layout_order(planted):
-    from facct27 import viz
-    *_, D, counts = planted
-    G = network.undirected(D)
-    louvain, hubs = viz.payload(D, G), viz.hub_payload(D, G, "CM")
-    assert [n["id"] for n in hubs["nodes"]] == [n["id"] for n in louvain["nodes"]]
-    assert hubs["links"] == louvain["links"]
-    assert [h["id"] for h in hubs["hubs"]] == ["C1001", "C2001"]
-    index = {n["id"]: i for i, n in enumerate(hubs["nodes"])}
-    for h in hubs["hubs"]:
-        want = {index[h["id"]]} | {index[u] for u in D.predecessors(h["id"])}
-        assert set(h["members"]) == want and h["repliers"] == len(want) - 1

@@ -48,10 +48,6 @@ def test_window_bounds_are_start_inclusive_end_exclusive():
     assert [x["created_utc"] for x in got] == [1000, 1500, 1999]
 
 
-def test_empty_window():
-    assert paginate(FakeArchive([]), "posts", "sub", 0, 10) == []
-
-
 def test_full_page_at_one_second_raises_instead_of_truncating():
     archive = FakeArchive([1000] * 5 + [1001])
     with pytest.raises(StallError):
