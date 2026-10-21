@@ -45,16 +45,10 @@ Plan: `docs/plans/2026-10-21-kirkley-hub-identification.md`. Decisions: the DECI
 4. **Clickable hub views.** These use the same layout as the Louvain view. Clicking a hub in the sidebar highlights it and the people who replied to it. They're local files only.
    `uv run python -m facct27.viz data/processed/2026-10-08 --out data/derived/2026-10-08/network-hubs-ER.html --groups ER`
    `uv run python -m facct27.viz data/processed/2026-10-08 --out data/derived/2026-10-08/network-hubs-CM.html --groups CM`
-   **Per month:** add `--start`/`--end` (start inclusive, end exclusive, the same windows as the monthly hub series). Each month gets its own layout, so people move between files. The window appears in the tab title.
-   ```zsh
-   for m in 2025-{02..12} 2026-{01..09}; do
-     next=$(date -u -d "$m-01 +1 month" +%Y-%m-%d)
-     for enc in ER CM; do
-       uv run python -m facct27.viz data/processed/2026-10-08 --start $m-01 --end $next \
-         --groups $enc --out data/derived/2026-10-08/hubs-monthly/$enc-$m.html
-     done
-   done
-   ```
+   **By month:** add `--months` for a month selector (‹ › or the arrow keys) over the same fixed layout: each month lights who was active and lists that month's hubs, and a chosen hub is followed from month to month.
+   `uv run python -m facct27.viz data/processed/2026-10-08 --out data/derived/2026-10-08/network-hubs-ER-months.html --groups ER --months`
+   `uv run python -m facct27.viz data/processed/2026-10-08 --out data/derived/2026-10-08/network-hubs-CM-months.html --groups CM --months`
+   Separate files per window (each with its own layout) still work with `--start`/`--end`.
 
 Reading the hubs table:
 - `ER<CM = yes` marks a window where ER compressed better, which is outside the regime where CM is guaranteed to win. Treat that window's *h*\* as low-confidence.
