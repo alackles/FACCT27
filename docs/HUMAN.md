@@ -8,10 +8,10 @@ Figures are from `verify` on the 2026-10-08 snapshot, run 2026-10-19.
 
 The code is built and tested on synthetic data only (plan: `docs/plans/2026-10-21-kirkley-hub-identification.md`; decisions: DECISIONS rows dated 2026-10-21). It hasn't touched the corpus. Run from `FACCT27-workflow/`:
 
-1. `uv run pytest` should show 54 passing.
+1. `uv run pytest` should show 58 passing.
 2. Hubs by month and cumulatively:
    `uv run python -m facct27.hubs data/processed/2026-10-08 --out data/derived/2026-10-08/hubs`
-   This prints the primary table (in-degree, contexts-weighted, CM hubs). `hubs.csv` holds all four variants (in/out × contexts/unweighted), and `hubs.json` adds the hub lists.
+   This prints two tables (in-degree, then out-degree; contexts-weighted; ER and CM hubs). `hubs.csv` holds all four variants (in/out × contexts/unweighted), and `hubs.json` adds the hub lists.
    *Rerun (updated 2026-10-21):* the printed table now shows ER and CM hubs, in-degree then out-degree. Only the printing changed, so rerun the same command; it takes seconds.
 3. Pole-candidate cuts with Kirkley (CM) hubs as the candidates, computed from a Gomory–Hu tree. Don't run this without `--cuts tree`: 492 candidates means ~120k pairs.
    `uv run python -m facct27.network data/processed/2026-10-08 --out data/derived/2026-10-08/network-kirkley --candidates kirkley --cuts tree`
