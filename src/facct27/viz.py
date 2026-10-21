@@ -64,10 +64,23 @@ def hub_list(D, encoding, weight, index):
     return hubs, r
 
 
-def hub_payload(D, G, encoding="CM", weight="contexts", months=()):
+def first_hubs(views, k):
+    """The first k people to be hubs: months in order, each month's hubs in rank
+    (in-degree) order, so a month that makes several people hubs at once gives the
+    earlier places to its higher-ranked ones."""
+    seen = {}
+    for m in views:
+        for h in m["hubs"]:
+            if len(seen) < k and h["id"] not in seen:
+                seen[h["id"]] = m["label"]
+    return [{"id": v, "first": label} for v, label in seen.items()]
+
+
+def hub_payload(D, G, encoding="CM", weight="contexts", months=(), track=0):
     """Kirkley in-hubs as groups. `months` is [(label, start, end, D_month)]: each
     becomes a view over the same nodes and links (so the same layout), listing which
-    people and ties are active that month, their monthly counts, and that month's hubs."""
+    people and ties are active that month, their monthly counts, and that month's hubs.
+    `track` > 0 gives the first `track` people to become hubs a fixed color each."""
     nodes, links, index = base(D, G)
     hubs, r = hub_list(D, encoding, weight, index)
     link_at = {frozenset((nodes[s]["id"], nodes[t]["id"])): i
@@ -86,6 +99,7 @@ def hub_payload(D, G, encoding="CM", weight="contexts", months=()):
             "links": [[link_at[frozenset((u, v))], w] for u, v, w in Gm.edges(data="weight")],
         })
     return {"nodes": nodes, "links": links, "hubs": hubs, "months": views,
+            "tracked": first_hubs(views, track),
             "meta": {"mode": "hubs", "encoding": encoding, "h": r[f"h_{encoding}"],
                      "in_degree_total": r["M"]}}
 
@@ -111,9 +125,13 @@ def main(argv=None):
                    help="sidebar groups: Louvain clusters, or Kirkley in-hubs (ER or CM)")
     p.add_argument("--months", action="store_true",
                    help="hub views only: add a month selector over the fixed whole-period layout")
+    p.add_argument("--track", type=int, default=0, metavar="K",
+                   help="with --months: color the first K people to become hubs (max 7)")
     a = p.parse_args(argv)
     if a.months and (a.groups == "louvain" or a.start or a.end):
         p.error("--months needs --groups ER or CM, and no --start/--end")
+    if a.track and not (a.months and 0 < a.track <= 7):
+        p.error("--track needs --months, and K from 1 to 7 (one color each)")
 
     posts = read_jsonl(os.path.join(a.snapshot, "posts.jsonl"))
     comments = read_jsonl(os.path.join(a.snapshot, "comments.jsonl"))
@@ -122,7 +140,7 @@ def main(argv=None):
     months = [(label, start, end, network.build(posts, comments, a.layer, start, end)[0])
               for label, start, end in month_windows(comments)] if a.months else ()
     data = (payload(D, G, a.seed, a.resolution) if a.groups == "louvain"
-            else hub_payload(D, G, a.groups, a.weight, months))
+            else hub_payload(D, G, a.groups, a.weight, months, a.track))
     data["meta"].update(layer=a.layer, weight=a.weight, start=a.start, end=a.end)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as f:
@@ -134,6 +152,8 @@ def main(argv=None):
     else:
         summary.update(encoding=a.groups, hubs=len(data["hubs"]),
                        top_hubs=[[h["id"], h["in_degree"]] for h in data["hubs"][:10]])
+        if data["tracked"]:
+            summary.update(tracked=[[t["id"], t["first"]] for t in data["tracked"]])
     print(json.dumps(summary, indent=2))
 
 
