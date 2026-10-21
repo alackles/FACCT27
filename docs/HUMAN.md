@@ -21,6 +21,10 @@ The code is built and tested on synthetic data only (plan: `docs/plans/2026-10-2
 5. Figure: Kirkley cut-offs on the whole-period degree sequences (added 2026-10-21; Python analysis, R plotting). Rerun step 2 first so `degrees.csv` exists, then:
    `Rscript figures/hub_degrees.R data/derived/2026-10-08/hubs/degrees.csv data/derived/2026-10-08/figures/hub_degrees.png`
    It needs R with ggplot2 and dplyr only. The PNG is counts only, but keep it local.
+6. Clickable hub views (same layout as the Louvain view; click a hub in the sidebar to light up it and its repliers):
+   `uv run python -m facct27.viz data/processed/2026-10-08 --out data/derived/2026-10-08/network-hubs-ER.html --groups ER`
+   `uv run python -m facct27.viz data/processed/2026-10-08 --out data/derived/2026-10-08/network-hubs-CM.html --groups CM`
+   Local files only, like the Louvain view.
 
 Reading the table:
 - `ER<CM = yes` marks a window where ER compressed better, i.e. outside the regime where CM is guaranteed to win. Treat that window's *h*\* as low-confidence.

@@ -117,7 +117,7 @@ dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
 </head>
 <body>
 <header>
-  <h1>Reply network</h1>
+  <h1 id="title">Reply network</h1>
   <span class="summary" id="summary"></span>
   <div class="controls">
     <input id="search" list="ids" placeholder="Find C…" aria-label="Find a node by pseudonym" size="10">
@@ -136,7 +136,7 @@ dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
     <h2>Selected</h2>
     <div id="card"><p class="empty">Click a node, a cluster, or a name below.</p></div>
     <h2>Key</h2>
-    <div class="key">
+    <div class="key" id="key">
       <div><span class="swatch" style="background:var(--series-1)"></span>Cluster 1 (largest)</div>
       <div><span class="swatch" style="background:var(--series-2)"></span>Cluster 2</div>
       <div><span class="swatch" style="background:var(--series-3)"></span>Cluster 3</div>
@@ -144,7 +144,7 @@ dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
       <div><span class="ring"></span>Moderator</div>
       <div>Size = number of connections</div>
     </div>
-    <h2>Clusters (Louvain)</h2>
+    <h2 id="groups-title">Clusters (Louvain)</h2>
     <ul class="list" id="clusters"></ul>
     <h2>Most connected</h2>
     <ul class="list" id="top"></ul>
@@ -156,7 +156,10 @@ dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
 const data = JSON.parse(document.getElementById("data").textContent);
 const nodes = data.nodes.map((d, i) => ({ ...d, index: i }));
 const links = data.links.map(([s, t, w]) => ({ source: s, target: t, w }));
-const clusterSize = new Map(data.clusters.map(c => [c.id, c.size]));
+const hubMode = data.meta.mode === "hubs";  // groups are Kirkley hubs, not clusters
+const clusterSize = new Map((data.clusters || []).map(c => [c.id, c.size]));
+const hubs = data.hubs || [];
+const hubIds = new Set(hubs.map(h => h.id));
 const neighbors = nodes.map(() => new Set());
 for (const l of links) { neighbors[l.source].add(l.target); neighbors[l.target].add(l.source); }
 const byId = new Map(nodes.map(n => [n.id, n]));
@@ -168,6 +171,8 @@ const labelled = new Set(nodes.slice(0, 5).map(n => n.index));  // nodes are sor
 
 let selected = null;      // node index
 let selectedCluster = null;
+let selectedHub = null;   // position in hubs
+let hubMembers = new Set();  // the selected hub and the people who replied to it
 let transform = d3.zoomIdentity;
 
 const canvas = document.getElementById("canvas");
@@ -176,9 +181,13 @@ const tip = document.getElementById("tip");
 let width = 0, height = 0;
 
 function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
-function fill(n, c) { return n.cluster <= 3 ? c["series-" + n.cluster] : c.other; }
+function fill(n, c) {
+  if (hubMode) return hubMembers.has(n.index) ? c["series-1"] : c.other;
+  return n.cluster <= 3 ? c["series-" + n.cluster] : c.other;
+}
 function active(n) {
   if (selected !== null) return n.index === selected || neighbors[selected].has(n.index);
+  if (selectedHub !== null) return hubMembers.has(n.index);
   if (selectedCluster !== null) return n.cluster === selectedCluster;
   return true;
 }
@@ -195,7 +204,8 @@ function resize() {
 function draw() {
   const c = { surface: css("--surface"), ink: css("--ink"), edge: css("--edge"), other: css("--other"),
               "series-1": css("--series-1"), "series-2": css("--series-2"), "series-3": css("--series-3") };
-  const focus = selected !== null || selectedCluster !== null;
+  const focus = selected !== null || selectedCluster !== null || selectedHub !== null;
+  const hubNode = selectedHub !== null ? byId.get(hubs[selectedHub].id).index : null;
   ctx.save();
   ctx.clearRect(0, 0, width, height);
   ctx.translate(transform.x, transform.y);
@@ -216,6 +226,7 @@ function draw() {
     for (const l of links) {
       if (!(active(l.source) && active(l.target))) continue;
       if (selected !== null && l.source.index !== selected && l.target.index !== selected) continue;
+      if (hubNode !== null && l.source.index !== hubNode && l.target.index !== hubNode) continue;
       ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y);
     }
     ctx.stroke();
@@ -247,6 +258,7 @@ function draw() {
   ctx.font = `${12 / transform.k}px system-ui, -apple-system, "Segoe UI", sans-serif`;
   const show = new Set(labelled);
   if (selected !== null) show.add(selected);
+  if (hubNode !== null) show.add(hubNode);
   for (const i of show) {
     const n = nodes[i];
     if (!active(n)) continue;
@@ -284,8 +296,20 @@ function showCard() {
     row(dl, "Replied to by (people)", n.replied_by.toLocaleString());
     row(dl, "Replied to (people)", n.replied_to.toLocaleString());
     row(dl, "Thread contexts", n.contexts.toLocaleString());
-    row(dl, "Cluster", `${n.cluster} (${clusterSize.get(n.cluster).toLocaleString()} people)`);
+    if (hubMode) row(dl, `Kirkley ${data.meta.encoding} hub`, hubIds.has(n.id) ? "yes" : "no");
+    else row(dl, "Cluster", `${n.cluster} (${clusterSize.get(n.cluster).toLocaleString()} people)`);
     row(dl, "Moderator", n.mod ? "yes" : "no");
+    card.append(h, dl);
+  } else if (selectedHub !== null) {
+    const hub = hubs[selectedHub];
+    const h = document.createElement("p");
+    h.style.margin = "0 0 6px"; h.style.fontWeight = "600"; h.textContent = hub.id;
+    const dl = document.createElement("dl");
+    row(dl, `${data.meta.encoding} hub rank`, `${selectedHub + 1} of ${hubs.length}`);
+    row(dl, "In-degree (thread contexts)", hub.in_degree.toLocaleString());
+    row(dl, "Share of all in-degree", `${(100 * hub.in_degree / data.meta.in_degree_total).toFixed(1)}%`);
+    row(dl, "Replied to by (people)", hub.repliers.toLocaleString());
+    row(dl, "Moderator", byId.get(hub.id).mod ? "yes" : "no");
     card.append(h, dl);
   } else if (selectedCluster !== null) {
     const members = nodes.filter(n => n.cluster === selectedCluster);
@@ -297,15 +321,24 @@ function showCard() {
     card.append(dl);
   } else {
     const p = document.createElement("p");
-    p.className = "empty"; p.textContent = "Click a node, a cluster, or a name below.";
+    p.className = "empty";
+    p.textContent = hubMode ? "Click a hub below, or a node." : "Click a node, a cluster, or a name below.";
     card.append(p);
   }
+  for (const b of document.querySelectorAll("#clusters button[data-hub]"))
+    b.setAttribute("aria-pressed", String(Number(b.dataset.hub) === selectedHub));
   for (const b of document.querySelectorAll("#clusters button"))
     b.setAttribute("aria-pressed", String(Number(b.dataset.id) === selectedCluster));
 }
 
-function select(i) { selected = i; selectedCluster = null; showCard(); draw(); }
-function selectCluster(id) { selectedCluster = id; selected = null; showCard(); draw(); }
+function clearHub() { selectedHub = null; hubMembers = new Set(); }
+function select(i) { selected = i; selectedCluster = null; clearHub(); showCard(); draw(); }
+function selectCluster(id) { selectedCluster = id; selected = null; clearHub(); showCard(); draw(); }
+function selectHub(i) {
+  selected = null; selectedCluster = null;
+  if (i === null) clearHub(); else { selectedHub = i; hubMembers = new Set(hubs[i].members); }
+  showCard(); draw();
+}
 
 function centerOn(n) {
   userMoved = true;
@@ -326,7 +359,20 @@ function fit() {
 // Lists: the keyboard and table route to everything the canvas shows.
 const colorVar = id => id <= 3 ? `var(--series-${id})` : "var(--other)";
 const clusterList = document.getElementById("clusters");
-for (const cl of data.clusters) {
+hubs.forEach((hub, i) => {
+  const li = document.createElement("li");
+  const b = document.createElement("button");
+  b.dataset.hub = i;
+  const sw = document.createElement("span");
+  sw.className = byId.get(hub.id).mod ? "swatch ring" : "swatch";
+  sw.style.background = "var(--series-1)";
+  const name = document.createElement("span"); name.textContent = hub.id;
+  const n = document.createElement("span"); n.className = "n"; n.textContent = hub.in_degree.toLocaleString();
+  b.append(sw, name, n);
+  b.addEventListener("click", () => selectHub(selectedHub === i ? null : i));
+  li.append(b); clusterList.append(li);
+});
+for (const cl of data.clusters || []) {
   const li = document.createElement("li");
   const b = document.createElement("button");
   b.dataset.id = cl.id;
@@ -343,7 +389,7 @@ for (const node of nodes.slice(0, 25)) {
   const b = document.createElement("button");
   const sw = document.createElement("span");
   sw.className = node.mod ? "swatch ring" : "swatch";
-  sw.style.background = colorVar(node.cluster);
+  sw.style.background = hubMode ? "var(--other)" : colorVar(node.cluster);
   const name = document.createElement("span"); name.textContent = node.id;
   const n = document.createElement("span"); n.className = "n"; n.textContent = node.degree.toLocaleString();
   b.append(sw, name, n);
@@ -355,13 +401,26 @@ for (const node of nodes) { const o = document.createElement("option"); o.value 
 
 document.getElementById("summary").textContent =
   `${nodes.length.toLocaleString()} people · ${links.length.toLocaleString()} ties · ` +
-  `${data.clusters.length.toLocaleString()} clusters · weight: ${data.meta.weight}`;
+  (hubMode ? `${hubs.length.toLocaleString()} ${data.meta.encoding} hubs`
+           : `${data.clusters.length.toLocaleString()} clusters`) + ` · weight: ${data.meta.weight}`;
+if (hubMode) {
+  document.title = `Reply network: Kirkley ${data.meta.encoding} hubs`;
+  document.getElementById("title").textContent = document.title;
+  document.getElementById("groups-title").textContent =
+    `Hubs (Kirkley ${data.meta.encoding}, in-degree) · ${hubs.length}`;
+  document.getElementById("key").innerHTML =
+    '<div><span class="swatch" style="background:var(--series-1)"></span>Selected hub and the people who replied to it</div>' +
+    '<div><span class="swatch" style="background:var(--other)"></span>Everyone else</div>' +
+    '<div><span class="ring"></span>Moderator</div><div>Size = number of connections</div>' +
+    '<div>Numbers in the hub list = in-degree (thread contexts)</div>';
+  showCard();
+}
 
 document.getElementById("search").addEventListener("change", e => {
   const n = byId.get(e.target.value.trim());
   if (n) { select(n.index); centerOn(n); }
 });
-document.getElementById("clear").addEventListener("click", () => { selected = null; selectedCluster = null; showCard(); draw(); });
+document.getElementById("clear").addEventListener("click", () => { selected = null; selectedCluster = null; clearHub(); showCard(); draw(); });
 document.getElementById("reset").addEventListener("click", () => { userMoved = false; fit(); });
 
 const zoom = d3.zoom().scaleExtent([0.02, 40]).on("zoom", e => {
@@ -380,7 +439,8 @@ canvas.addEventListener("pointermove", e => {
   if (!n) { tip.style.display = "none"; return; }
   tip.replaceChildren();
   const v = document.createElement("strong"); v.textContent = n.degree.toLocaleString();
-  const s = document.createElement("span"); s.textContent = ` connections · ${n.id} · cluster ${n.cluster}${n.mod ? " · mod" : ""}`;
+  const group = hubMode ? (hubIds.has(n.id) ? ` · ${data.meta.encoding} hub` : "") : ` · cluster ${n.cluster}`;
+  const s = document.createElement("span"); s.textContent = ` connections · ${n.id}${group}${n.mod ? " · mod" : ""}`;
   tip.append(v, s);
   const [mx, my] = d3.pointer(e, canvas);
   tip.style.left = `${mx + 14}px`; tip.style.top = `${my + 14}px`;

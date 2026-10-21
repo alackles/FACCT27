@@ -184,3 +184,17 @@ def test_viz_payload_covers_every_node_and_tie(planted):
     html = viz.render({"x": "</script>"})  # a closing tag in the data can't end the block
     blob = html.split('type="application/json">', 1)[1].split("</script>", 1)[0]
     assert json.loads(blob) == {"x": "</script>"}
+
+
+def test_hub_view_groups_each_hub_with_its_repliers_in_the_same_layout_order(planted):
+    from facct27 import viz
+    *_, D, counts = planted
+    G = network.undirected(D)
+    louvain, hubs = viz.payload(D, G), viz.hub_payload(D, G, "CM")
+    assert [n["id"] for n in hubs["nodes"]] == [n["id"] for n in louvain["nodes"]]
+    assert hubs["links"] == louvain["links"]
+    assert [h["id"] for h in hubs["hubs"]] == ["C1001", "C2001"]
+    index = {n["id"]: i for i, n in enumerate(hubs["nodes"])}
+    for h in hubs["hubs"]:
+        want = {index[h["id"]]} | {index[u] for u in D.predecessors(h["id"])}
+        assert set(h["members"]) == want and h["repliers"] == len(want) - 1
