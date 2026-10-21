@@ -7,7 +7,8 @@ Each window is scanned for in- and out-hubs, on contexts-weighted and unweighted
 degree. Prints the contexts-weighted rows (in-, then out-degree; ER and CM hubs)
 as counts and pseudonyms only, so the tables are safe to paste; all rows go to
 hubs.json (with hub lists) and hubs.csv (scalars). degrees.csv holds the
-whole-period degree sequences with hub flags, for figures/hub_degrees.R.
+whole-period degree sequences with hub flags, for figures/hub_degrees.R, and
+degrees_monthly.csv the same per calendar month, for figures/hub_degrees_monthly.R.
 Decisions: docs/DECISIONS.md (2026-10-21).
 """
 
@@ -46,6 +47,16 @@ def degree_table(D):
             rows += [{"direction": direction, "weighting": weighting, "node": v,
                       "degree": deg[v], "rank": i, "hub_ER": i <= r["h_ER"],
                       "hub_CM": i <= r["h_CM"]} for i, v in enumerate(ranked, 1)]
+    return rows
+
+
+def monthly_degree_table(posts, comments, needs_review=True, mod_actions=True):
+    """degree_table for each calendar-month window, each row tagged with its window."""
+    rows = []
+    for label, start, end in months(comments):
+        D, _ = network.build(posts, comments, start=start, end=end,
+                             needs_review=needs_review, mod_actions=mod_actions)
+        rows += [{"window": label, **r} for r in degree_table(D)]
     return rows
 
 
@@ -104,7 +115,7 @@ def table(rows, direction="in", show=8):
     return "\n".join(lines)
 
 
-def write(out, report, degrees=()):
+def write(out, report, degrees=(), monthly_degrees=()):
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, "hubs.json"), "w", encoding="utf-8") as f:
         json.dump(report, f, indent=1)
@@ -112,11 +123,13 @@ def write(out, report, degrees=()):
         w = csv.DictWriter(f, SCALARS, extrasaction="ignore")
         w.writeheader()
         w.writerows(report["rows"])
-    with open(os.path.join(out, "degrees.csv"), "w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, ["direction", "weighting", "node", "degree", "rank",
-                               "hub_ER", "hub_CM"])
-        w.writeheader()
-        w.writerows(degrees)
+    fields = ["direction", "weighting", "node", "degree", "rank", "hub_ER", "hub_CM"]
+    for name, rows, cols in (("degrees.csv", degrees, fields),
+                             ("degrees_monthly.csv", monthly_degrees, ["window"] + fields)):
+        with open(os.path.join(out, name), "w", encoding="utf-8", newline="") as f:
+            w = csv.DictWriter(f, cols)
+            w.writeheader()
+            w.writerows(rows)
 
 
 def main(argv=None):
@@ -137,7 +150,9 @@ def main(argv=None):
               "params": {"needs_review": not a.exclude_needs_review,
                          "mod_actions": not a.exclude_mod_actions},
               "rows": rows, "seconds": round(time.time() - began, 1)}
-    write(a.out, report, degree_table(D))
+    write(a.out, report, degree_table(D),
+          monthly_degree_table(posts, comments, not a.exclude_needs_review,
+                               not a.exclude_mod_actions))
     print(table(rows, "in"))
     print()
     print(table(rows, "out"))
