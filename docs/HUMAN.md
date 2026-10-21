@@ -18,6 +18,10 @@ The code is built and tested on synthetic data only (plan: `docs/plans/2026-10-2
    Expected runtime: the tree took 12 s on a synthetic graph of similar size. Betweenness and closeness for the report run as before. (ER finds one hub, so no candidate pairs; that's read straight from the hubs output and needs no run.)
 4. Share back the printed hubs tables, `hubs.csv`/`hubs.json` if you want the secondary runs looked at, and the network report's `candidates` and `cut_summary` blocks plus its `cuts` (non-degenerate pairs only). `gomory_hu.json` (pseudonyms and cut values) is what any look at satellite subtrees would need. All of these are counts and pseudonyms.
 
+5. Figure: Kirkley cut-offs on the whole-period degree sequences (added 2026-10-21; Python analysis, R plotting). Rerun step 2 first so `degrees.csv` exists, then:
+   `Rscript figures/hub_degrees.R data/derived/2026-10-08/hubs/degrees.csv data/derived/2026-10-08/figures/hub_degrees.png`
+   It needs R with ggplot2 and dplyr only. The PNG is counts only, but keep it local.
+
 Reading the table:
 - `ER<CM = yes` marks a window where ER compressed better, i.e. outside the regime where CM is guaranteed to win. Treat that window's *h*\* as low-confidence.
 - *h*\* = 0 means the data don't justify hubs at that window's size. It isn't evidence that there are none.

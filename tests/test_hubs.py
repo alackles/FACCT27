@@ -64,9 +64,26 @@ def test_cli_end_to_end_on_toy_snapshot(tmp_path, capsys):
     report = json.loads((tmp_path / "hubs" / "hubs.json").read_text())
     with open(tmp_path / "hubs" / "hubs.csv", newline="") as f:
         assert len(list(csv.DictReader(f))) == len(report["rows"])
+    with open(tmp_path / "hubs" / "degrees.csv", newline="") as f:
+        degrees = list(csv.DictReader(f))
+    assert len(degrees) == 4 * len({d["node"] for d in degrees})
     names = {v for r in report["rows"] for enc in ("ER", "CM") for v, _, _ in r[f"hubs_{enc}"]}
     assert names and all(v.startswith("C") for v in names)
     assert "in-degree, contexts-weighted" in printed and "out-degree, contexts-weighted" in printed
     er = {v for r in report["rows"] if r["weighting"] == "contexts" for v, _, _ in r["hubs_ER"]}
     assert er and all(f"{v}:" in printed for v in er)
     assert "SENTINEL_TEXT" not in printed + json.dumps(report)  # no text leaks
+
+
+def test_degree_table_flags_agree_with_the_scan():
+    posts, comments, _ = toy.price(seed=0)
+    D, _ = network.build(posts, comments)
+    rows = hubs.degree_table(D)
+    for direction in hubs.DIRECTIONS:
+        for weighting, weighted in hubs.WEIGHTINGS.items():
+            panel = [r for r in rows if (r["direction"], r["weighting"]) == (direction, weighting)]
+            r = kirkley.scan(hubs.degree_sequence(D, direction, weighted), weighted)
+            assert [p["rank"] for p in panel] == list(range(1, D.number_of_nodes() + 1))
+            assert sum(p["hub_ER"] for p in panel) == r["h_ER"]
+            assert sum(p["hub_CM"] for p in panel) == r["h_CM"]
+            assert [p["degree"] for p in panel] == sorted((p["degree"] for p in panel), reverse=True)

@@ -6,8 +6,9 @@ Each window's graph comes from network.build, so every edge rule applies unchang
 Each window is scanned for in- and out-hubs, on contexts-weighted and unweighted
 degree. Prints the contexts-weighted rows (in-, then out-degree; ER and CM hubs)
 as counts and pseudonyms only, so the tables are safe to paste; all rows go to
-hubs.json (with hub lists) and hubs.csv (scalars). Decisions: docs/DECISIONS.md
-(2026-10-21).
+hubs.json (with hub lists) and hubs.csv (scalars). degrees.csv holds the
+whole-period degree sequences with hub flags, for figures/hub_degrees.R.
+Decisions: docs/DECISIONS.md (2026-10-21).
 """
 
 import argparse
@@ -31,6 +32,21 @@ def degree_sequence(D, direction="in", weighted=True):
     """{node: degree} over every node of D, zeros included."""
     deg = D.in_degree if direction == "in" else D.out_degree
     return dict(deg(weight="contexts" if weighted else None))
+
+
+def degree_table(D):
+    """Tidy rows for plotting: one per node x direction x weighting, with its degree,
+    rank (1 = highest, ties in kirkley.scan's order) and ER/CM hub flags."""
+    rows = []
+    for direction in DIRECTIONS:
+        for weighting, weighted in WEIGHTINGS.items():
+            deg = degree_sequence(D, direction, weighted)
+            r = kirkley.scan(deg, weighted)
+            ranked = sorted(deg, key=lambda v: (-deg[v], v))
+            rows += [{"direction": direction, "weighting": weighting, "node": v,
+                      "degree": deg[v], "rank": i, "hub_ER": i <= r["h_ER"],
+                      "hub_CM": i <= r["h_CM"]} for i, v in enumerate(ranked, 1)]
+    return rows
 
 
 def months(comments):
@@ -88,7 +104,7 @@ def table(rows, direction="in", show=8):
     return "\n".join(lines)
 
 
-def write(out, report):
+def write(out, report, degrees=()):
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, "hubs.json"), "w", encoding="utf-8") as f:
         json.dump(report, f, indent=1)
@@ -96,6 +112,11 @@ def write(out, report):
         w = csv.DictWriter(f, SCALARS, extrasaction="ignore")
         w.writeheader()
         w.writerows(report["rows"])
+    with open(os.path.join(out, "degrees.csv"), "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, ["direction", "weighting", "node", "degree", "rank",
+                               "hub_ER", "hub_CM"])
+        w.writeheader()
+        w.writerows(degrees)
 
 
 def main(argv=None):
@@ -110,11 +131,13 @@ def main(argv=None):
     posts = read_jsonl(os.path.join(a.snapshot, "posts.jsonl"))
     comments = read_jsonl(os.path.join(a.snapshot, "comments.jsonl"))
     rows = analyze(posts, comments, not a.exclude_needs_review, not a.exclude_mod_actions)
+    D, _ = network.build(posts, comments, needs_review=not a.exclude_needs_review,
+                         mod_actions=not a.exclude_mod_actions)
     report = {"snapshot": a.snapshot,
               "params": {"needs_review": not a.exclude_needs_review,
                          "mod_actions": not a.exclude_mod_actions},
               "rows": rows, "seconds": round(time.time() - began, 1)}
-    write(a.out, report)
+    write(a.out, report, degree_table(D))
     print(table(rows, "in"))
     print()
     print(table(rows, "out"))
