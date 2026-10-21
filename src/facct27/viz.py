@@ -9,7 +9,9 @@ local, and don't publish or share it.
 Groups are Louvain communities on the undirected, contexts-weighted graph (the
 default), or Kirkley in-hubs under --groups ER / CM: clicking a hub highlights it and
 the people who replied to it. Node order, and so the layout, is the same in every
-version. Exploratory, for looking, not a reported result.
+version. With --months, a hub view also steps through calendar months (the windows
+of facct27.hubs) on that fixed layout: each month shows who and which ties were
+active, and that month's hubs. Exploratory, for looking, not a reported result.
 """
 
 import argparse
@@ -19,6 +21,7 @@ import os
 import networkx as nx
 
 from facct27 import kirkley, network
+from facct27.hubs import months as month_windows
 from facct27.collect import read_jsonl
 
 TEMPLATE = os.path.join(os.path.dirname(__file__), "viz.html")
@@ -51,15 +54,38 @@ def payload(D, G, seed=0, resolution=1.0):
     }
 
 
-def hub_payload(D, G, encoding="CM", weight="contexts"):
-    """Kirkley in-hubs (weighted in-degree, multigraph encodings) as groups: each hub
-    with the people who replied to it, since their replies are what make it a hub."""
-    nodes, links, index = base(D, G)
+def hub_list(D, encoding, weight, index):
+    """Kirkley in-hubs of D (weighted in-degree, multigraph encodings), each with the
+    people who replied to it, since their replies are what make it a hub."""
     r = kirkley.scan(dict(D.in_degree(weight=weight)), weighted=True)
     hubs = [{"id": v, "in_degree": k, "repliers": D.in_degree(v),
              "members": sorted([index[v]] + [index[u] for u in D.predecessors(v)])}
             for v, k in r[f"hubs_{encoding}"]]
-    return {"nodes": nodes, "links": links, "hubs": hubs,
+    return hubs, r
+
+
+def hub_payload(D, G, encoding="CM", weight="contexts", months=()):
+    """Kirkley in-hubs as groups. `months` is [(label, start, end, D_month)]: each
+    becomes a view over the same nodes and links (so the same layout), listing which
+    people and ties are active that month, their monthly counts, and that month's hubs."""
+    nodes, links, index = base(D, G)
+    hubs, r = hub_list(D, encoding, weight, index)
+    link_at = {frozenset((nodes[s]["id"], nodes[t]["id"])): i
+               for i, (s, t, _) in enumerate(links)}
+    views = []
+    for label, start, end, Dm in months:
+        Gm = network.undirected(Dm, weight)
+        m_hubs, m = hub_list(Dm, encoding, weight, index)
+        views.append({
+            "label": label, "start": start, "end": end,
+            "h": m[f"h_{encoding}"], "in_degree_total": m["M"], "hubs": m_hubs,
+            # [index, connections, thread contexts, replied to by, replied to, mod]
+            "nodes": [[index[v], Gm.degree(v), Gm.degree(v, weight="weight"),
+                       Dm.in_degree(v), Dm.out_degree(v), int(bool(Dm.nodes[v].get("mod")))]
+                      for v in Dm],
+            "links": [[link_at[frozenset((u, v))], w] for u, v, w in Gm.edges(data="weight")],
+        })
+    return {"nodes": nodes, "links": links, "hubs": hubs, "months": views,
             "meta": {"mode": "hubs", "encoding": encoding, "h": r[f"h_{encoding}"],
                      "in_degree_total": r["M"]}}
 
@@ -83,14 +109,20 @@ def main(argv=None):
     p.add_argument("--resolution", type=float, default=1.0, help="Louvain resolution")
     p.add_argument("--groups", choices=["louvain", "ER", "CM"], default="louvain",
                    help="sidebar groups: Louvain clusters, or Kirkley in-hubs (ER or CM)")
+    p.add_argument("--months", action="store_true",
+                   help="hub views only: add a month selector over the fixed whole-period layout")
     a = p.parse_args(argv)
+    if a.months and (a.groups == "louvain" or a.start or a.end):
+        p.error("--months needs --groups ER or CM, and no --start/--end")
 
     posts = read_jsonl(os.path.join(a.snapshot, "posts.jsonl"))
     comments = read_jsonl(os.path.join(a.snapshot, "comments.jsonl"))
     D, _ = network.build(posts, comments, a.layer, a.start, a.end)
     G = network.undirected(D, a.weight)
+    months = [(label, start, end, network.build(posts, comments, a.layer, start, end)[0])
+              for label, start, end in month_windows(comments)] if a.months else ()
     data = (payload(D, G, a.seed, a.resolution) if a.groups == "louvain"
-            else hub_payload(D, G, a.groups, a.weight))
+            else hub_payload(D, G, a.groups, a.weight, months))
     data["meta"].update(layer=a.layer, weight=a.weight, start=a.start, end=a.end)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as f:

@@ -66,12 +66,17 @@ header {
 header h1 { font-size: 15px; margin: 0; font-weight: 600; }
 header .summary { color: var(--ink-2); font-variant-numeric: tabular-nums; }
 header .controls { margin-left: auto; display: flex; gap: 8px; }
-input, button {
+input, button, select {
   font: inherit; color: var(--ink); background: var(--surface);
   border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px;
 }
-button { cursor: pointer; }
+button, select { cursor: pointer; }
 button:hover { background: var(--hairline); }
+button:disabled { color: var(--muted); cursor: default; background: var(--surface); }
+.months { display: flex; gap: 4px; align-items: center; }
+.months[hidden] { display: none; }
+.months select { font-variant-numeric: tabular-nums; }
+.note { color: var(--ink-2); margin: 6px 0 0; }
 main { flex: 1; display: flex; min-height: 0; }
 #stage { flex: 1; position: relative; background: var(--surface); min-width: 0; }
 canvas { display: block; width: 100%; height: 100%; cursor: grab; }
@@ -120,6 +125,11 @@ dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
   <h1 id="title">Reply network</h1>
   <span class="summary" id="summary"></span>
   <div class="controls">
+    <div class="months" id="months" hidden>
+      <button id="prev" aria-label="Previous month" title="Previous (←)">‹</button>
+      <select id="month" aria-label="Month"></select>
+      <button id="next" aria-label="Next month" title="Next (→)">›</button>
+    </div>
     <input id="search" list="ids" placeholder="Find C…" aria-label="Find a node by pseudonym" size="10">
     <datalist id="ids"></datalist>
     <button id="clear">Clear selection</button>
@@ -158,20 +168,51 @@ const nodes = data.nodes.map((d, i) => ({ ...d, index: i }));
 const links = data.links.map(([s, t, w]) => ({ source: s, target: t, w }));
 const hubMode = data.meta.mode === "hubs";  // groups are Kirkley hubs, not clusters
 const clusterSize = new Map((data.clusters || []).map(c => [c.id, c.size]));
-const hubs = data.hubs || [];
-const hubIds = new Set(hubs.map(h => h.id));
-const neighbors = nodes.map(() => new Set());
-for (const l of links) { neighbors[l.source].add(l.target); neighbors[l.target].add(l.source); }
 const byId = new Map(nodes.map(n => [n.id, n]));
 
+// Views: the whole period, then (with --months) one per calendar month. Every view
+// uses the same nodes and positions; a month says which people and ties were active,
+// their counts that month, and that month's hubs. Built on first visit.
+function neighborSets(linkIndices) {
+  const nb = nodes.map(() => new Set());
+  for (const i of linkIndices) { const [s, t] = data.links[i]; nb[s].add(t); nb[t].add(s); }
+  return nb;
+}
+const months = data.months || [];
+const views = [{ label: "Whole period", hubs: data.hubs || [], total: data.meta.in_degree_total,
+                 nodeOn: null, linkOn: null, stats: null, nLinks: links.length,
+                 neighbors: neighborSets(links.keys()), ranked: nodes.map(n => n.index) }];
+function view(i) {
+  if (i === 0 || views[i]) return views[i];
+  const m = months[i - 1];
+  const stats = new Map(m.nodes.map(([j, degree, contexts, replied_by, replied_to, mod]) =>
+    [j, { degree, contexts, replied_by, replied_to, mod: !!mod }]));
+  const linkOn = new Uint8Array(links.length);
+  for (const [li] of m.links) linkOn[li] = 1;
+  return views[i] = {
+    label: m.label, hubs: m.hubs, total: m.in_degree_total, stats, linkOn,
+    nodeOn: new Set(stats.keys()), nLinks: m.links.length,
+    neighbors: neighborSets(m.links.map(([li]) => li)),
+    ranked: [...stats.keys()].sort((a, b) => stats.get(b).degree - stats.get(a).degree || a - b),
+  };
+}
+let viewIndex = 0;
+let V = view(0);
+let hubs = V.hubs;
+let hubIds = new Set(hubs.map(h => h.id));
+const on = n => !V.nodeOn || V.nodeOn.has(n.index);   // active in the current view
+const st = n => V.stats ? V.stats.get(n.index) : n;    // its counts there (undefined if not)
+
+// Size is whole-period connections in every view, so marks don't change size between
+// months: a month changes what is lit, not the picture underneath.
 const maxDeg = d3.max(nodes, n => n.degree) || 1;
 const radius = d3.scaleSqrt().domain([1, maxDeg]).range([2.5, 16]);
 nodes.forEach(n => { n.r = radius(Math.max(1, n.degree)); });
-const labelled = new Set(nodes.slice(0, 5).map(n => n.index));  // nodes are sorted by degree
 
 let selected = null;      // node index
 let selectedCluster = null;
 let selectedHub = null;   // position in hubs
+let followHub = null;     // id of the hub last chosen; followed from month to month
 let hubMembers = new Set();  // the selected hub and the people who replied to it
 let transform = d3.zoomIdentity;
 
@@ -186,7 +227,8 @@ function fill(n, c) {
   return n.cluster <= 3 ? c["series-" + n.cluster] : c.other;
 }
 function active(n) {
-  if (selected !== null) return n.index === selected || neighbors[selected].has(n.index);
+  if (!on(n)) return false;
+  if (selected !== null) return n.index === selected || V.neighbors[selected].has(n.index);
   if (selectedHub !== null) return hubMembers.has(n.index);
   if (selectedCluster !== null) return n.cluster === selectedCluster;
   return true;
@@ -215,15 +257,17 @@ function draw() {
   ctx.strokeStyle = c.edge;
   ctx.globalAlpha = focus ? 0.04 : 0.10;
   ctx.beginPath();
-  for (const l of links) {
-    if (focus && active(l.source) && active(l.target)) continue;
+  links.forEach((l, i) => {  // ties not active in this view aren't drawn at all
+    if (V.linkOn && !V.linkOn[i]) return;
+    if (focus && active(l.source) && active(l.target)) return;
     ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y);
-  }
+  });
   ctx.stroke();
   if (focus) {
     ctx.globalAlpha = 0.45;
     ctx.beginPath();
-    for (const l of links) {
+    for (const [i, l] of links.entries()) {
+      if (V.linkOn && !V.linkOn[i]) continue;
       if (!(active(l.source) && active(l.target))) continue;
       if (selected !== null && l.source.index !== selected && l.target.index !== selected) continue;
       if (hubNode !== null && l.source.index !== hubNode && l.target.index !== hubNode) continue;
@@ -236,7 +280,7 @@ function draw() {
   // screen pixels, so zooming in spreads a dense region apart.
   for (let i = nodes.length - 1; i >= 0; i--) {
     const n = nodes[i];
-    ctx.globalAlpha = active(n) ? 1 : 0.12;
+    ctx.globalAlpha = active(n) ? 1 : on(n) ? 0.12 : 0.05;  // inactive this month: faintest
     ctx.beginPath();
     ctx.arc(n.x, n.y, n.r / transform.k, 0, 2 * Math.PI);
     ctx.fillStyle = fill(n, c);
@@ -244,7 +288,7 @@ function draw() {
     ctx.lineWidth = 1 / transform.k;
     ctx.strokeStyle = c.surface;
     ctx.stroke();
-    if (n.mod) {
+    if ((st(n) || n).mod) {  // in a month: moderator-distinguished activity that month
       ctx.beginPath();
       ctx.arc(n.x, n.y, (n.r + 2) / transform.k, 0, 2 * Math.PI);
       ctx.lineWidth = 1.5 / transform.k;
@@ -256,12 +300,12 @@ function draw() {
   ctx.globalAlpha = 1;
   ctx.fillStyle = c.ink;
   ctx.font = `${12 / transform.k}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-  const show = new Set(labelled);
+  const show = new Set(V.ranked.slice(0, 5));
   if (selected !== null) show.add(selected);
   if (hubNode !== null) show.add(hubNode);
   for (const i of show) {
     const n = nodes[i];
-    if (!active(n)) continue;
+    if (!active(n) && i !== selected) continue;  // the selection keeps its label in any month
     ctx.fillText(n.id, n.x + (n.r + 4) / transform.k, n.y + 4 / transform.k);
   }
   ctx.restore();
@@ -287,29 +331,42 @@ function row(dl, label, value) {
 function showCard() {
   const card = document.getElementById("card");
   card.replaceChildren();
+  const when = viewIndex ? ` (${V.label})` : "";
   if (selected !== null) {
-    const n = nodes[selected];
+    const n = nodes[selected], s = st(n);
     const h = document.createElement("p");
     h.style.margin = "0 0 6px"; h.style.fontWeight = "600"; h.textContent = n.id;
-    const dl = document.createElement("dl");
-    row(dl, "Connections (people)", n.degree.toLocaleString());
-    row(dl, "Replied to by (people)", n.replied_by.toLocaleString());
-    row(dl, "Replied to (people)", n.replied_to.toLocaleString());
-    row(dl, "Thread contexts", n.contexts.toLocaleString());
-    if (hubMode) row(dl, `Kirkley ${data.meta.encoding} hub`, hubIds.has(n.id) ? "yes" : "no");
-    else row(dl, "Cluster", `${n.cluster} (${clusterSize.get(n.cluster).toLocaleString()} people)`);
-    row(dl, "Moderator", n.mod ? "yes" : "no");
-    card.append(h, dl);
+    card.append(h);
+    if (followHub === n.id && !hubIds.has(n.id)) {
+      const p = document.createElement("p"); p.className = "note";
+      p.textContent = `Not a Kirkley ${data.meta.encoding} hub${when}; showing everyone they're tied to.`;
+      card.append(p);
+    }
+    if (!s) {
+      const p = document.createElement("p"); p.className = "empty";
+      p.textContent = `No kept replies to or from them in ${V.label}.`;
+      card.append(p);
+    } else {
+      const dl = document.createElement("dl");
+      row(dl, `Connections (people)${when}`, s.degree.toLocaleString());
+      row(dl, `Replied to by (people)${when}`, s.replied_by.toLocaleString());
+      row(dl, `Replied to (people)${when}`, s.replied_to.toLocaleString());
+      row(dl, `Thread contexts${when}`, s.contexts.toLocaleString());
+      if (hubMode) row(dl, `Kirkley ${data.meta.encoding} hub${when}`, hubIds.has(n.id) ? "yes" : "no");
+      else row(dl, "Cluster", `${n.cluster} (${clusterSize.get(n.cluster).toLocaleString()} people)`);
+      row(dl, `Moderator${when}`, s.mod ? "yes" : "no");
+      card.append(dl);
+    }
   } else if (selectedHub !== null) {
     const hub = hubs[selectedHub];
     const h = document.createElement("p");
     h.style.margin = "0 0 6px"; h.style.fontWeight = "600"; h.textContent = hub.id;
     const dl = document.createElement("dl");
-    row(dl, `${data.meta.encoding} hub rank`, `${selectedHub + 1} of ${hubs.length}`);
+    row(dl, `${data.meta.encoding} hub rank${when}`, `${selectedHub + 1} of ${hubs.length}`);
     row(dl, "In-degree (thread contexts)", hub.in_degree.toLocaleString());
-    row(dl, "Share of all in-degree", `${(100 * hub.in_degree / data.meta.in_degree_total).toFixed(1)}%`);
+    row(dl, "Share of all in-degree", `${(100 * hub.in_degree / V.total).toFixed(1)}%`);
     row(dl, "Replied to by (people)", hub.repliers.toLocaleString());
-    row(dl, "Moderator", byId.get(hub.id).mod ? "yes" : "no");
+    row(dl, "Moderator", st(byId.get(hub.id)).mod ? "yes" : "no");
     card.append(h, dl);
   } else if (selectedCluster !== null) {
     const members = nodes.filter(n => n.cluster === selectedCluster);
@@ -327,17 +384,37 @@ function showCard() {
   }
   for (const b of document.querySelectorAll("#clusters button[data-hub]"))
     b.setAttribute("aria-pressed", String(Number(b.dataset.hub) === selectedHub));
-  for (const b of document.querySelectorAll("#clusters button"))
+  for (const b of document.querySelectorAll("#clusters button[data-id]"))
     b.setAttribute("aria-pressed", String(Number(b.dataset.id) === selectedCluster));
 }
 
 function clearHub() { selectedHub = null; hubMembers = new Set(); }
-function select(i) { selected = i; selectedCluster = null; clearHub(); showCard(); draw(); }
-function selectCluster(id) { selectedCluster = id; selected = null; clearHub(); showCard(); draw(); }
+function select(i) { selected = i; selectedCluster = null; followHub = null; clearHub(); showCard(); draw(); }
+function selectCluster(id) { selectedCluster = id; selected = null; followHub = null; clearHub(); showCard(); draw(); }
 function selectHub(i) {
   selected = null; selectedCluster = null;
-  if (i === null) clearHub(); else { selectedHub = i; hubMembers = new Set(hubs[i].members); }
+  if (i === null) { clearHub(); followHub = null; }
+  else { selectedHub = i; hubMembers = new Set(hubs[i].members); followHub = hubs[i].id; }
   showCard(); draw();
+}
+
+// Switch view, keeping the selection. A chosen hub is followed by id: where it is a
+// hub that month its repliers are lit; where it isn't, it is shown as a plain
+// selection (everyone it's tied to that month) until it is a hub again.
+function setView(i) {
+  const keep = followHub;
+  viewIndex = i; V = view(i);
+  hubs = V.hubs; hubIds = new Set(hubs.map(h => h.id));
+  clearHub();
+  if (keep !== null) {
+    const j = hubs.findIndex(h => h.id === keep);
+    if (j >= 0) { selected = null; selectedHub = j; hubMembers = new Set(hubs[j].members); }
+    else selected = byId.get(keep).index;
+  }
+  monthSelect.value = String(i);
+  document.getElementById("prev").disabled = i === 0;
+  document.getElementById("next").disabled = i === months.length;
+  renderLists(); summarize(); showCard(); draw();
 }
 
 function centerOn(n) {
@@ -359,19 +436,41 @@ function fit() {
 // Lists: the keyboard and table route to everything the canvas shows.
 const colorVar = id => id <= 3 ? `var(--series-${id})` : "var(--other)";
 const clusterList = document.getElementById("clusters");
-hubs.forEach((hub, i) => {
-  const li = document.createElement("li");
-  const b = document.createElement("button");
-  b.dataset.hub = i;
-  const sw = document.createElement("span");
-  sw.className = byId.get(hub.id).mod ? "swatch ring" : "swatch";
-  sw.style.background = "var(--series-1)";
-  const name = document.createElement("span"); name.textContent = hub.id;
-  const n = document.createElement("span"); n.className = "n"; n.textContent = hub.in_degree.toLocaleString();
-  b.append(sw, name, n);
-  b.addEventListener("click", () => selectHub(selectedHub === i ? null : i));
-  li.append(b); clusterList.append(li);
-});
+const topList = document.getElementById("top");
+function renderLists() {  // hub list and "most connected", for the current view
+  if (hubMode) {
+    clusterList.replaceChildren();
+    hubs.forEach((hub, i) => {
+      const li = document.createElement("li");
+      const b = document.createElement("button");
+      b.dataset.hub = i;
+      const sw = document.createElement("span");
+      sw.className = st(byId.get(hub.id)).mod ? "swatch ring" : "swatch";
+      sw.style.background = "var(--series-1)";
+      const name = document.createElement("span"); name.textContent = hub.id;
+      const n = document.createElement("span"); n.className = "n"; n.textContent = hub.in_degree.toLocaleString();
+      b.append(sw, name, n);
+      b.addEventListener("click", () => selectHub(selectedHub === i ? null : i));
+      li.append(b); clusterList.append(li);
+    });
+    document.getElementById("groups-title").textContent =
+      `Hubs (Kirkley ${data.meta.encoding}, in-degree) · ${hubs.length}`;
+  }
+  topList.replaceChildren();
+  for (const i of V.ranked.slice(0, 25)) {
+    const node = nodes[i], s = st(node);
+    const li = document.createElement("li");
+    const b = document.createElement("button");
+    const sw = document.createElement("span");
+    sw.className = s.mod ? "swatch ring" : "swatch";
+    sw.style.background = hubMode ? "var(--other)" : colorVar(node.cluster);
+    const name = document.createElement("span"); name.textContent = node.id;
+    const n = document.createElement("span"); n.className = "n"; n.textContent = s.degree.toLocaleString();
+    b.append(sw, name, n);
+    b.addEventListener("click", () => { select(node.index); centerOn(node); });
+    li.append(b); topList.append(li);
+  }
+}
 for (const cl of data.clusters || []) {
   const li = document.createElement("li");
   const b = document.createElement("button");
@@ -383,37 +482,50 @@ for (const cl of data.clusters || []) {
   b.addEventListener("click", () => selectCluster(selectedCluster === cl.id ? null : cl.id));
   li.append(b); clusterList.append(li);
 }
-const topList = document.getElementById("top");
-for (const node of nodes.slice(0, 25)) {
-  const li = document.createElement("li");
-  const b = document.createElement("button");
-  const sw = document.createElement("span");
-  sw.className = node.mod ? "swatch ring" : "swatch";
-  sw.style.background = hubMode ? "var(--other)" : colorVar(node.cluster);
-  const name = document.createElement("span"); name.textContent = node.id;
-  const n = document.createElement("span"); n.className = "n"; n.textContent = node.degree.toLocaleString();
-  b.append(sw, name, n);
-  b.addEventListener("click", () => { select(node.index); centerOn(node); });
-  li.append(b); topList.append(li);
-}
 const datalist = document.getElementById("ids");
 for (const node of nodes) { const o = document.createElement("option"); o.value = node.id; datalist.append(o); }
 
-document.getElementById("summary").textContent =
-  `${nodes.length.toLocaleString()} people · ${links.length.toLocaleString()} ties · ` +
-  (hubMode ? `${hubs.length.toLocaleString()} ${data.meta.encoding} hubs`
-           : `${data.clusters.length.toLocaleString()} clusters`) + ` · weight: ${data.meta.weight}`;
+function summarize() {
+  const people = V.nodeOn ? `${V.nodeOn.size.toLocaleString()} of ${nodes.length.toLocaleString()} people`
+                          : `${nodes.length.toLocaleString()} people`;
+  document.getElementById("summary").textContent =
+    `${people} · ${V.nLinks.toLocaleString()} ties · ` +
+    (hubMode ? `${hubs.length.toLocaleString()} ${data.meta.encoding} hubs`
+             : `${data.clusters.length.toLocaleString()} clusters`) + ` · weight: ${data.meta.weight}` +
+    (viewIndex ? ` · month: ${V.label} (UTC)` : "");
+}
+renderLists();
+summarize();
 if (hubMode) {
-  document.title = `Reply network: Kirkley ${data.meta.encoding} hubs`;
+  document.title = `Reply network: Kirkley ${data.meta.encoding} hubs` + (months.length ? " by month" : "");
   document.getElementById("title").textContent = document.title;
-  document.getElementById("groups-title").textContent =
-    `Hubs (Kirkley ${data.meta.encoding}, in-degree) · ${hubs.length}`;
   document.getElementById("key").innerHTML =
     '<div><span class="swatch" style="background:var(--series-1)"></span>Selected hub and the people who replied to it</div>' +
     '<div><span class="swatch" style="background:var(--other)"></span>Everyone else</div>' +
-    '<div><span class="ring"></span>Moderator</div><div>Size = number of connections</div>' +
+    (months.length ? '<div><span class="swatch" style="background:var(--other);opacity:0.3"></span>Faint = no kept replies that month</div>' : '') +
+    '<div><span class="ring"></span>Moderator' + (months.length ? ' (in a month: acted as one that month)' : '') + '</div>' +
+    '<div>Size = number of connections' + (months.length ? ', whole period (fixed across months)' : '') + '</div>' +
     '<div>Numbers in the hub list = in-degree (thread contexts)</div>';
   showCard();
+}
+
+// Month selector: positions never change, so stepping months compares like with like.
+const monthSelect = document.getElementById("month");
+if (months.length) {
+  document.getElementById("months").hidden = false;
+  ["Whole period", ...months.map(m => m.label)].forEach((label, i) => {
+    const o = document.createElement("option"); o.value = String(i); o.textContent = label;
+    monthSelect.append(o);
+  });
+  monthSelect.addEventListener("change", () => setView(Number(monthSelect.value)));
+  document.getElementById("prev").addEventListener("click", () => viewIndex > 0 && setView(viewIndex - 1));
+  document.getElementById("next").addEventListener("click", () => viewIndex < months.length && setView(viewIndex + 1));
+  document.getElementById("prev").disabled = true;
+  document.addEventListener("keydown", e => {
+    if (["INPUT", "SELECT"].includes(e.target.tagName)) return;
+    if (e.key === "ArrowLeft" && viewIndex > 0) setView(viewIndex - 1);
+    if (e.key === "ArrowRight" && viewIndex < months.length) setView(viewIndex + 1);
+  });
 }
 // Time window, if one was given: shown in the summary, and leading the tab title so
 // month-by-month files can be told apart.
@@ -428,7 +540,7 @@ document.getElementById("search").addEventListener("change", e => {
   const n = byId.get(e.target.value.trim());
   if (n) { select(n.index); centerOn(n); }
 });
-document.getElementById("clear").addEventListener("click", () => { selected = null; selectedCluster = null; clearHub(); showCard(); draw(); });
+document.getElementById("clear").addEventListener("click", () => { selected = null; selectedCluster = null; followHub = null; clearHub(); showCard(); draw(); });
 document.getElementById("reset").addEventListener("click", () => { userMoved = false; fit(); });
 
 const zoom = d3.zoom().scaleExtent([0.02, 40]).on("zoom", e => {
@@ -446,9 +558,11 @@ canvas.addEventListener("pointermove", e => {
   const n = nodeAt(e);
   if (!n) { tip.style.display = "none"; return; }
   tip.replaceChildren();
-  const v = document.createElement("strong"); v.textContent = n.degree.toLocaleString();
+  const c = st(n);
+  const v = document.createElement("strong"); v.textContent = c ? c.degree.toLocaleString() : "no";
   const group = hubMode ? (hubIds.has(n.id) ? ` · ${data.meta.encoding} hub` : "") : ` · cluster ${n.cluster}`;
-  const s = document.createElement("span"); s.textContent = ` connections · ${n.id}${group}${n.mod ? " · mod" : ""}`;
+  const s = document.createElement("span");
+  s.textContent = ` connections${viewIndex ? " in " + V.label : ""} · ${n.id}${group}${c && c.mod ? " · mod" : ""}`;
   tip.append(v, s);
   const [mx, my] = d3.pointer(e, canvas);
   tip.style.left = `${mx + 14}px`; tip.style.top = `${my + 14}px`;
