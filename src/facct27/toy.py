@@ -151,6 +151,36 @@ def generate(seed=0, members=30, hub_threads=12):
     return toy.posts, toy.comments, truth
 
 
+def price(seed=0, T=100, m=4, alpha=2.7, start=1_738_368_000, step_days=3):
+    """Growing network from Kirkley 2024 Eq. 11 (Price's model, attachment exponent alpha).
+
+    Starts with m seed members C1..Cm. At step t a new member arrives and replies, in a
+    thread of its own, to posts by m distinct existing members, each chosen with
+    probability proportional to (in-degree + 1) ** alpha. Step t happens on day
+    start + t * step_days (default start 2025-02-01 UTC), so steps land in known months.
+    Returns (posts, comments, truth) with the seeds and each step's day.
+    """
+    toy = Toy(seed, start)
+    rng = toy.rng
+    members = [f"C{i}" for i in range(1, m + 1)]
+    k = dict.fromkeys(members, 0)
+    days = []
+    for t in range(T):
+        toy.t = start + t * step_days * 86400
+        days.append(toy.t)
+        new = f"C{m + t + 1}"
+        weights = [(k[v] + 1) ** alpha for v in members]
+        targets = set()
+        while len(targets) < m:
+            targets.add(rng.choices(members, weights)[0])
+        for v in sorted(targets):
+            toy.comment(new, toy.post(v))
+            k[v] += 1
+        members.append(new)
+        k[new] = 0
+    return toy.posts, toy.comments, {"seeds": members[:m], "step_utc": days, "in_degree": k}
+
+
 def from_graph(G, weight="weight"):
     """Records in which each edge (u, v, w) is w threads of u replying to a post by v.
     Nodes are renamed C1, C2, … in G's node order; returns (posts, comments, names)."""
