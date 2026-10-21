@@ -4,9 +4,10 @@
 
 Each window's graph comes from network.build, so every edge rule applies unchanged.
 Each window is scanned for in- and out-hubs, on contexts-weighted and unweighted
-degree. Prints the primary rows (in-degree, contexts-weighted) as counts and
-pseudonyms only, so the table is safe to paste; all rows go to hubs.json (with hub
-lists) and hubs.csv (scalars). Decisions: docs/DECISIONS.md (2026-10-21).
+degree. Prints the contexts-weighted rows (in-, then out-degree; ER and CM hubs)
+as counts and pseudonyms only, so the tables are safe to paste; all rows go to
+hubs.json (with hub lists) and hubs.csv (scalars). Decisions: docs/DECISIONS.md
+(2026-10-21).
 """
 
 import argparse
@@ -67,20 +68,23 @@ def analyze(posts, comments, needs_review=True, mod_actions=True):
     return rows
 
 
-def table(rows, show=8):
-    """Primary rows as text: CM hubs listed as pseudonym:degree, * = moderator."""
-    head = f"{'series':<10} {'window':<7} {'N':>5} {'M':>6} {'h_CM':>4} {'h_ER':>4} " \
-           f"{'eta_CM':>6} {'ER<CM':>5}  CM hubs"
-    lines = [head]
+def table(rows, direction="in", show=8):
+    """Contexts-weighted rows for one direction as text: ER then CM hubs, each
+    listed as pseudonym:degree (* = moderator), first `show` then a count."""
+    def listed(hubs):
+        text = " ".join(f"{v}:{k}{'*' if mod else ''}" for v, k, mod in hubs[:show])
+        return text + (f" (+{len(hubs) - show})" if len(hubs) > show else "")
+
+    lines = [f"{direction}-degree, contexts-weighted",
+             f"{'series':<10} {'window':<7} {'N':>5} {'M':>6} {'h_ER':>4} {'h_CM':>4} "
+             f"{'eta_CM':>6} {'ER<CM':>5}  ER hubs | CM hubs"]
     for r in rows:
-        if r["direction"] != "in" or r["weighting"] != "contexts":
+        if r["direction"] != direction or r["weighting"] != "contexts":
             continue
-        hubs = " ".join(f"{v}:{k}{'*' if mod else ''}" for v, k, mod in r["hubs_CM"][:show])
-        if len(r["hubs_CM"]) > show:
-            hubs += f" (+{len(r['hubs_CM']) - show})"
         lines.append(f"{r['series']:<10} {r['window']:<7} {r['N']:>5} {r['M']:>6} "
-                     f"{r['h_CM']:>4} {r['h_ER']:>4} {r['eta_CM']:>6.3f} "
-                     f"{'yes' if r['er_wins'] else '':>5}  {hubs}")
+                     f"{r['h_ER']:>4} {r['h_CM']:>4} {r['eta_CM']:>6.3f} "
+                     f"{'yes' if r['er_wins'] else '':>5}  "
+                     f"{listed(r['hubs_ER'])} | {listed(r['hubs_CM'])}")
     return "\n".join(lines)
 
 
@@ -111,7 +115,9 @@ def main(argv=None):
                          "mod_actions": not a.exclude_mod_actions},
               "rows": rows, "seconds": round(time.time() - began, 1)}
     write(a.out, report)
-    print(table(rows))
+    print(table(rows, "in"))
+    print()
+    print(table(rows, "out"))
     print(f"\n{len(rows)} rows (in/out x contexts/unweighted) in {a.out}/hubs.csv; "
           f"{report['seconds']} s")
 

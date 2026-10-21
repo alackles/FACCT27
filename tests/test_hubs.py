@@ -66,4 +66,7 @@ def test_cli_end_to_end_on_toy_snapshot(tmp_path, capsys):
         assert len(list(csv.DictReader(f))) == len(report["rows"])
     names = {v for r in report["rows"] for enc in ("ER", "CM") for v, _, _ in r[f"hubs_{enc}"]}
     assert names and all(v.startswith("C") for v in names)
+    assert "in-degree, contexts-weighted" in printed and "out-degree, contexts-weighted" in printed
+    er = {v for r in report["rows"] if r["weighting"] == "contexts" for v, _, _ in r["hubs_ER"]}
+    assert er and all(f"{v}:" in printed for v in er)
     assert "SENTINEL_TEXT" not in printed + json.dumps(report)  # no text leaks
