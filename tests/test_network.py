@@ -88,6 +88,25 @@ def test_cut_that_only_isolates_a_weak_pole_is_flagged(planted):
     assert cut["no_better_than_isolating"]
 
 
+def test_kirkley_candidates_are_the_planted_hubs_and_get_cut(planted):
+    posts, comments, truth, *_ = planted
+    _, report, cuts = network.analyze(posts, comments, candidates="kirkley")
+    assert report["candidates"]["rule"] == "kirkley"
+    assert [v for v, _ in report["candidates"]["hubs"]] == ["C1001", "C2001"]
+    assert [(c["s"], c["t"]) for c in cuts] == [("C1001", "C2001")]
+    assert cuts[0]["cut"] == truth["cross_edges"]
+
+
+def test_single_kirkley_hub_reports_no_candidate_pairs():
+    star = nx.DiGraph((f"leaf{i}", "centre") for i in range(40))
+    star.add_edges_from((f"leaf{i}", f"leaf{i + 1}") for i in range(0, 40, 4))
+    posts, comments, names = toy.from_graph(star)
+    _, report, cuts = network.analyze(posts, comments, candidates="kirkley")
+    assert report["candidates"]["h"] == 1
+    assert report["candidates"]["hubs"][0][0] == names["centre"]
+    assert report["candidates"]["note"] == "no candidate pairs" and cuts == []
+
+
 def test_mention_layer_links_mentioner_to_mentioned(planted):
     posts, comments, truth, *_ = planted
     M, _ = network.build(posts, comments, layer="mention")

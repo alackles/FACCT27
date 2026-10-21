@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 
 import networkx as nx
 
+from facct27 import kirkley
 from facct27.collect import read_jsonl
 from facct27.pseudonymize import SYSTEM_ACCOUNTS, TEXT_FIELDS
 
@@ -167,26 +168,41 @@ def cut_pairs(G, poles):
     return rows
 
 
+def kirkley_candidates(D, weight="contexts"):
+    """CM in-hubs (Kirkley 2024) on in-degree weighted by `weight`, as pole candidates."""
+    r = kirkley.scan(dict(D.in_degree(weight=weight)), weighted=True)
+    info = {"rule": "kirkley", "h": r["h_CM"], "hubs": r["hubs_CM"], "er_wins": r["er_wins"]}
+    if r["h_CM"] < 2:
+        info["note"] = "no candidate pairs"
+    return [v for v, _ in r["hubs_CM"]], info
+
+
 def analyze(posts, comments, layer="reply", weight="contexts", start=None, end=None,
-            needs_review=True, mod_actions=True, k=5, betweenness_sample=None):
+            needs_review=True, mod_actions=True, k=5, betweenness_sample=None,
+            candidates="topk"):
     D, counts = build(posts, comments, layer, start, end, needs_review, mod_actions)
     G = undirected(D, weight)
     scores = centrality(D, G, weight, betweenness_sample)
     for name, s in scores.items():
         nx.set_node_attributes(D, s, name)
     tops = {name: top(s, k) for name, s in scores.items()}
-    cuts = cut_pairs(G, set().union(*tops.values()))
+    if candidates == "kirkley":
+        poles, chosen = kirkley_candidates(D, weight)
+    else:
+        poles, chosen = set().union(*tops.values()), {"rule": "topk", "k": k}
+    cuts = cut_pairs(G, poles)
     sizes = sorted((len(c) for c in nx.connected_components(G)), reverse=True)
     report = {
         "params": {"layer": layer, "weight": weight, "start": start, "end": end,
                    "needs_review": needs_review, "mod_actions": mod_actions, "top_k": k,
-                   "betweenness_sample": betweenness_sample},
+                   "betweenness_sample": betweenness_sample, "candidates": candidates},
         "edge_rules": dict(sorted(counts.items())),
         "graph": {"nodes": D.number_of_nodes(), "directed_edges": D.number_of_edges(),
                   "undirected_edges": G.number_of_edges(), "components": len(sizes),
                   "largest_component": sizes[0] if sizes else 0,
                   "mods": sum(m for _, m in D.nodes(data="mod")),
                   "authors_without_edges": D.graph["authors_without_edges"]},
+        "candidates": chosen,
         "top": {name: [[v, round(scores[name][v], 6), D.nodes[v]["mod"]] for v in vs]
                 for name, vs in tops.items()},
         "cuts": [{k: v for k, v in c.items() if not k.endswith("_members")} for c in cuts],
@@ -220,6 +236,8 @@ def main(argv=None):
     p.add_argument("--exclude-needs-review", action="store_true")
     p.add_argument("--exclude-mod-actions", action="store_true")
     p.add_argument("--top", type=int, default=5, help="candidates per centrality measure")
+    p.add_argument("--candidates", choices=["topk", "kirkley"], default="topk",
+                   help="pole candidates: top-k per measure, or Kirkley CM in-hubs")
     p.add_argument("--betweenness-sample", type=int,
                    help="approximate betweenness from this many sources (default: exact)")
     a = p.parse_args(argv)
@@ -229,7 +247,7 @@ def main(argv=None):
     comments = read_jsonl(os.path.join(a.snapshot, "comments.jsonl"))
     D, report, cuts = analyze(posts, comments, a.layer, a.weight, a.start, a.end,
                               not a.exclude_needs_review, not a.exclude_mod_actions,
-                              a.top, a.betweenness_sample)
+                              a.top, a.betweenness_sample, a.candidates)
     report = {"snapshot": a.snapshot, **report, "seconds": round(time.time() - began, 1)}
     write(a.out, D, report, cuts)
     print(json.dumps(report, indent=2))
