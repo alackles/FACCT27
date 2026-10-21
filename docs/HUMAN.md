@@ -34,15 +34,27 @@ Plan: `docs/plans/2026-10-21-kirkley-hub-identification.md`. Decisions: the DECI
 
 1. **Hubs by month and cumulatively:**
    `uv run python -m facct27.hubs data/processed/2026-10-08 --out data/derived/2026-10-08/hubs`
-   This prints two tables, in-degree and then out-degree, both contexts-weighted with ER and CM hubs. `hubs.csv` holds all four variants (in/out × contexts/unweighted), `hubs.json` adds the hub lists, and `degrees.csv` feeds the figure. It takes seconds.
+   This prints two tables, in-degree and then out-degree, both contexts-weighted with ER and CM hubs. `hubs.csv` holds all four variants (in/out × contexts/unweighted), `hubs.json` adds the hub lists, and `degrees.csv` and `degrees_monthly.csv` feed the figures. It takes seconds.
 2. **Pole-candidate cuts**, with the CM hubs as candidates and computed from a Gomory–Hu tree. Never run this without `--cuts tree`, since 492 candidates means ~120k pairs. The tree took 80 s on the corpus graph.
    `uv run python -m facct27.network data/processed/2026-10-08 --out data/derived/2026-10-08/network-kirkley --candidates kirkley --cuts tree`
    ER finds only one hub, so it has no candidate pairs. That result comes straight from the hubs output and needs no run.
 3. **Figure: Kirkley cut-offs** on the whole-period degree sequences. Step 1 has to run first. Needs R with ggplot2 and dplyr. The PNG is counts only, but keep it local.
    `Rscript figures/hub_degrees.R data/derived/2026-10-08/hubs/degrees.csv data/derived/2026-10-08/figures/hub_degrees.png`
+   **Monthly version:** one panel per calendar month, axes shared across panels, and each strip giving that month's N, M, and *h*\*. In-degree, contexts-weighted by default. Add `out` and/or `unweighted` as extra arguments for the other variants, each as a separate file.
+   `Rscript figures/hub_degrees_monthly.R data/derived/2026-10-08/hubs data/derived/2026-10-08/figures/hub_degrees_monthly.png`
 4. **Clickable hub views.** These use the same layout as the Louvain view. Clicking a hub in the sidebar highlights it and the people who replied to it. They're local files only.
    `uv run python -m facct27.viz data/processed/2026-10-08 --out data/derived/2026-10-08/network-hubs-ER.html --groups ER`
    `uv run python -m facct27.viz data/processed/2026-10-08 --out data/derived/2026-10-08/network-hubs-CM.html --groups CM`
+   **Per month:** add `--start`/`--end` (start inclusive, end exclusive, the same windows as the monthly hub series). Each month gets its own layout, so people move between files. The window appears in the tab title.
+   ```zsh
+   for m in 2025-{02..12} 2026-{01..09}; do
+     next=$(date -u -d "$m-01 +1 month" +%Y-%m-%d)
+     for enc in ER CM; do
+       uv run python -m facct27.viz data/processed/2026-10-08 --start $m-01 --end $next \
+         --groups $enc --out data/derived/2026-10-08/hubs-monthly/$enc-$m.html
+     done
+   done
+   ```
 
 Reading the hubs table:
 - `ER<CM = yes` marks a window where ER compressed better, which is outside the regime where CM is guaranteed to win. Treat that window's *h*\* as low-confidence.
