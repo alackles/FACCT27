@@ -247,6 +247,24 @@ const slot = new Map(tracked.map((t, i) => [t.id, i + 1]));
 const tracking = tracked.length > 0;
 const hollow = n => tracking && slot.has(n.id) && !hubIds.has(n.id);
 
+// A tie takes the color of the hub it feeds: hub and someone who replied to it in this
+// view (its members). Where a tie feeds two hubs, the one with the higher in-degree in
+// this view colors it (hubs are listed in that order). Cached per view.
+const pairIndex = new Map(data.links.map(([s, t], i) => [s < t ? `${s}-${t}` : `${t}-${s}`, i]));
+function linkHubs(view) {
+  if (view.linkHub) return view.linkHub;
+  const owner = new Map();  // link index -> hub id
+  for (const h of view.hubs) {
+    const hi = byId.get(h.id).index;
+    for (const m of h.members) {
+      if (m === hi) continue;
+      const li = pairIndex.get(hi < m ? `${hi}-${m}` : `${m}-${hi}`);
+      if (li !== undefined && !owner.has(li) && (!view.linkOn || view.linkOn[li])) owner.set(li, h.id);
+    }
+  }
+  return view.linkHub = owner;
+}
+
 function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 function fill(n, c) {
   if (tracking) return slot.has(n.id) ? c["series-" + slot.get(n.id)]
@@ -282,26 +300,34 @@ function draw() {
   ctx.translate(transform.x, transform.y);
   ctx.scale(transform.k, transform.k);
 
-  ctx.lineWidth = 0.6 / transform.k;
-  ctx.strokeStyle = c.edge;
-  ctx.globalAlpha = focus ? 0.04 : 0.10;
-  ctx.beginPath();
+  // Ties: grey, or (when tracking) the color of the hub they feed. Strokes are batched
+  // into one path per color and alpha.
+  const owner = tracking ? linkHubs(V) : new Map();
+  const tieColor = i => {
+    const h = owner.get(i);
+    return h === undefined ? c.edge : slot.has(h) ? c["series-" + slot.get(h)] : c["hub-other"];
+  };
+  const focused = (l) => active(l.source) && active(l.target) &&
+    !(selected !== null && l.source.index !== selected && l.target.index !== selected) &&
+    !(hubNode !== null && l.source.index !== hubNode && l.target.index !== hubNode);
+  const batches = new Map();  // "color|alpha|width" -> [links]
   links.forEach((l, i) => {  // ties not active in this view aren't drawn at all
     if (V.linkOn && !V.linkOn[i]) return;
-    if (focus && active(l.source) && active(l.target)) return;
-    ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y);
+    const colored = owner.has(i);
+    let alpha, width = colored ? 0.9 : 0.6;
+    if (focus && focused(l)) alpha = colored ? 0.7 : 0.45;
+    else if (focus && active(l.source) && active(l.target)) return;  // as before: skipped
+    else alpha = focus ? (colored ? 0.08 : 0.04) : (colored ? 0.4 : 0.10);
+    const key = `${colored ? tieColor(i) : c.edge}|${alpha}|${width}`;
+    if (!batches.has(key)) batches.set(key, []);
+    batches.get(key).push(l);
   });
-  ctx.stroke();
-  if (focus) {
-    ctx.globalAlpha = 0.45;
+  // Faint before strong, so lit ties sit on top.
+  for (const [key, ls] of [...batches].sort((a, b) => a[0].split("|")[1] - b[0].split("|")[1])) {
+    const [color, alpha, width] = key.split("|");
+    ctx.strokeStyle = color; ctx.globalAlpha = Number(alpha); ctx.lineWidth = Number(width) / transform.k;
     ctx.beginPath();
-    for (const [i, l] of links.entries()) {
-      if (V.linkOn && !V.linkOn[i]) continue;
-      if (!(active(l.source) && active(l.target))) continue;
-      if (selected !== null && l.source.index !== selected && l.target.index !== selected) continue;
-      if (hubNode !== null && l.source.index !== hubNode && l.target.index !== hubNode) continue;
-      ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y);
-    }
+    for (const l of ls) { ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y); }
     ctx.stroke();
   }
 
@@ -582,6 +608,7 @@ if (hubMode) {
     ? '<div><span class="swatch" style="background:var(--series-1)"></span>Tracked (list below), ' + enc + ' hub this month</div>' +
       '<div><span class="swatch" style="border:2.5px solid var(--series-1)"></span>Tracked, active but not a hub this month</div>' +
       '<div><span class="swatch" style="background:var(--hub-other)"></span>Other ' + enc + ' hub this month</div>' +
+      '<div>Ties to a hub from people who replied to it take the hub\'s color; a tie feeding two hubs takes the one with more in-degree that month</div>' +
       '<div>Click a hub: it and its repliers stay, everyone else fades</div>'
     : '<div><span class="swatch" style="background:var(--series-1)"></span>Selected hub and the people who replied to it</div>') +
     '<div><span class="swatch" style="background:var(--other)"></span>Everyone else</div>' +
