@@ -55,6 +55,29 @@ The two are close for posts and well apart for comments. Arctic Shift doesn't do
 - **Why it matters:** the paper reports a count of self-deleted items (see the 2026-10-08 DECISIONS row). Until this is understood, take that number from `removal_type == "deleted"`, not from `was_deleted_later`.
 - **Possible check:** cross-tabulate `was_deleted_later` against `removal_type` in `verify`. That's count-only, and a one-line change if wanted.
 
+## Idea for a spare full day: comparison subreddits
+
+Raised and postponed 2026-10-22 (Acacia). The idea is a short argument that other Claude-focused subreddits, r/claudexplorers and r/ClaudeAI, are structured differently from r/ClaudeAIJailbreak. It's about a full day's work, so it goes in only if there's an extra day before submission.
+
+Sizes from Arctic Shift's `time_series` (counts only, fetched 2026-10-22), 2025-02 to 2026-09:
+
+| | Posts | Comments | First month |
+|---|---|---|---|
+| ClaudeAIJailbreak | 2,366 | 20,914 | 2025-02 |
+| claudexplorers | 8,561 | 105,667 | 2025-08 |
+| ClaudeAI | 134,313 | 1,400,161 | 2023-01 |
+
+What it would take:
+- **r/claudexplorers runs as is.** `collect --subreddit claudexplorers`. The collector doesn't need any change to keep data away from Claude: it prints counts only, and the same rule applies as before, where you run it and share only reports. Put the subreddit in the snapshot directory name (e.g. `data/raw/2026-10-22-claudexplorers`), because `pseudonymize` names its output directory after the snapshot directory's name and two snapshots from the same day would collide.
+- **r/ClaudeAI needs code.** `collect`'s merge step, `pseudonymize`, and `verify` load the whole snapshot into memory, which won't fit at ~1.5M items. Gomory–Hu and the viz HTML won't scale to its node count, though Kirkley and Louvain will.
+- **The comparison needs rarefaction.** Kirkley's *h*\* depends on data volume, so comparing a 21k-comment network with a 1.4M one mostly measures size. Subsample the larger subreddits to the jailbreak sub's volume (see Future directions in the draft repo's `PROJECT.md`).
+
+Calls to make first:
+1. IRB: the exempt determination covers r/ClaudeAIJailbreak only. Check whether adding subreddits needs a notification or an amendment.
+2. Does the no-Claude data boundary (DECISIONS 2026-10-19) extend to these subreddits? Claude assumes yes.
+3. One shared pseudonym map, which makes overlap across communities visible, or separate maps? This is for both authors.
+4. For r/ClaudeAI, a full census or a matched window (2025-08 to 2026-09, when all three subreddits exist)?
+
 ## Reference: replicating the Kirkley hub analysis
 
 Plan: `docs/plans/2026-10-21-kirkley-hub-identification.md`. Decisions: the DECISIONS rows dated 2026-10-21. Run from `FACCT27-workflow/`, after `uv run pytest`, which should show 46 passing.
